@@ -1,25 +1,69 @@
 Password Manager:
-A password manager is a secure tool that stores and manages your passwords for you. It can be an app, a browser extension, or a built-in feature on your device or web browser. We recommend using a trusted standalone password manager. 
+A password manager is a secure tool that stores and manages your passwords for you. 
+It can be an app, a browser extension, or a built-in feature on your device or web browser.
+
 With a password manager, you can: 
 •	Generate strong, unique passwords for every account 
 •	Store them securely in an encrypted vault 
 •	Autofill login details when you visit websites or apps 
+(Definition source: https://www.staysafeonline.org/articles/password-managers)
+
+
 
 Use-cases:
-1.	A user wants to use a secure program for storing their passwords, so they use the password manager to stop remembering all the password and stop writing them down on paper (though the paper cannot be hacked, but it can be stolen, look through the shoulder or just ripped off and the information would be lost forever).
-2.	A user wants an application which would generate secure passwords for them that meets best-practice password standards (length, complexity, etc.), so they use password manager which would be programmed to randomly generate secure passwords. The user can also specify which specific standards to follow (specific symbols, length, characters – all of it is customizible). If the website rejects the generated password, then the person can manually set the requirements. 
-3.	A user wants to easily access from one location (application/extension/etc.) to all their passwords, so they use password manager which would store in in one location all the passwords that user defines. The user could also synchronize the passwords to the other devices to:
-a.	Be able to remotely control the main database and in case of emergency – block it;
-b.	Be able to login to the same websites on the different websites/applications without manually retyping the password each time or using separate password manager, since the solution should nbe centralized.
-4.	A user wants password to be auto filled in needed fields, so they use password manager which would store the website name + password, when the website/application name matches, the application would provide the option to use autofill. The password manager should also verify not just domain of the website, but also the IP address in order to not used spoofed one and avoid filling the credentials to fake websites.
-5.	A user wants to create backups of their passwords in case the main access is lost, so they use password manager which would store offline copy of the database which user can use in case any trouble with the main one happens. They can also send this offline copy to other device in case anything happens with their main device. All the backups should be protected and encrypted, so someone without a key could de access it. The user can restore it by specifying key-phrase or creating MFA to your authorized second device like phone or second PC. If the backup is stolen, then the attacker would not be able to access it. The backup can be automated to be crated in a specified time (like once a week, etc.) and can be outdated for the security reasons – the person can specify the lifetime of it.
+1.	A user wants to use a secure program for storing their passwords.
+So they use the password manager to stop remembering all the password and stop writing them down on paper (though the paper cannot be hacked, 
+but it can be stolen, look through the shoulder or just ripped off and the information would be lost forever).
+
+2.	A user wants an application which would generate secure passwords for them that meets best-practice password standards (length, complexity, etc.). 
+So they use password manager which would be programmed to randomly generate secure passwords. 
+The user can also specify which specific standards to follow (specific symbols, length, characters – all of it is customizible). 
+If the website rejects the generated password, then the person can manually set the requirements. 
+
+3.	A user wants to easily access from one location (application/extension/etc.) to all their passwords. 
+So they use password manager which would store in in one location all the passwords that user defines. 
+The user could also synchronize the passwords to the other devices to:
+  a.	Be able to remotely control the main database and in case of emergency – block it;
+  b.	Be able to login to the same websites on the different websites/applications without manually retyping the password each time or using separate password manager,  
+      since the solution should be centralized.
+
+4.	A user wants password to be auto filled in needed fields. 
+So they use password manager which would store the website name + password, when the website/application name matches, 
+the application would provide the option to use autofill.
+The password manager should also verify not just domain of the website, 
+but also the IP address in order to not used spoofed one and avoid filling the credentials to fake websites.
+
+5.	A user wants to create backups of their passwords in case the main access is lost.
+So they use password manager which would store offline copy of the database which user can use in case any trouble with the main one happens. 
+They can also send this offline copy to other device in case anything happens with their main device. 
+All the backups should be protected and encrypted, so someone without a key could de access it. 
+The user can restore it by specifying key-phrase or creating MFA to your authorized second device like phone or second PC. 
+If the backup is stolen, then the attacker would not be able to access it. 
+The backup can be automated to be crated in a specified time (like once a week, etc.) and can be outdated for the security reasons – the person can specify the lifetime of it.
+
+
 
 Misuse-cases:
-1.	An attacker obtains the master password from the password manager which gives access to the whole database’s passwords, they could do it by social engineering\user using the same password everywhere and it gets leaked/no sufficient encryption measures used to store the password. The master password should not be recoverable.
-2.	An attacker might get access to the person’s device where the passwords are located. If the sufficient security measures persist, then an attacker cannot get the passwords from it.
-3.	Due to insufficient security measures, an attacker can enter the vault. After doing that, they can access each password because the initial security measure was passed (confidentially is the main here). 
-4.	Except from confidentiality measures, there is also integrity. An attacker can also mess up all password if their initial motivation is not stealing. After that, the user would not be able to use the database only if the backup was not done before.
+1.	An attacker obtains the master password from the password manager which gives access to the whole database’s passwords. 
+They could do it by social engineering\user using the same password everywhere and it gets leaked/no sufficient encryption measures used to store the password. 
+The master password should not be recoverable.
+
+2.	An attacker might get access to the person’s device where the passwords are located. 
+If the sufficient security measures persist, then an attacker cannot get the passwords from it.
+
+3.	Due to insufficient security measures, an attacker can enter the vault. 
+After doing that, they can access each password because the initial security measure was passed (confidentially is the main here). 
+
+4.	Except from confidentiality measures, there is also integrity. 
+An attacker can also mess up all password if their initial motivation is not stealing. 
+After that, the user would not be able to use the database only if the backup was not done before.
+
 5.	As well as, an attacker can delete everything and user would not be able to access his passwords, only if the backup previously was created.
-6.	An attackers get device and/or access to the device and trying to access the database with passwords. If there is not remote control for the user to freeze/block the database remotely, then the attacker by getting the device/access to device, can steal all the data. If the user cannot block it remotely, then at least the offline backup should be enough for the user to go through all his accounts and block/reset the password.
-7.	An attacker could find critical vulnerability which grands authorization possibility without necessary privilege, so the correct assess of vulnerabilities and monitoring of new ones should be performed. 
+
+6.	An attackers get device and/or access to the device and trying to access the database with passwords. 
+If there is not remote control for the user to freeze/block the database remotely, then the attacker by getting the device/access to device, can steal all the data. 
+If the user cannot block it remotely, then at least the offline backup should be enough for the user to go through all his accounts and block/reset the password.
+
+7.	An attacker could find critical vulnerability which grands authorization possibility without necessary privilege.
+So the correct assess of vulnerabilities and monitoring of new ones should be performed. 
 

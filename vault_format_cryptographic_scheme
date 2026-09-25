@@ -1,0 +1,32 @@
+Vault format:
+The password manager stores the vault in a JSON file.
+The file contains:
+- a format version;
+- a random salt;
+- a random nonce;
+- encrypted credential data;
+- an authentication tag.
+
+Example:
+{
+  "version": 1,
+  "salt": "...",
+  "nonce": "...",
+  "encrypted_data": "...",
+  "authentication_tag": "..."
+}
+
+The actual usernames, passwords, and notes are stored inside
+encrypted_data. They are not stored as readable text!!!
+
+
+### Cryptographic scheme
+
+The protection process works as follows:
+
+1. The user enters the master password.
+2. The application derives an encryption key from the master password and salt.
+3. The vault data is encrypted using AES-GCM.
+4. A new random nonce is used every time the vault is saved.
+5. The authentication tag checks whether the encrypted vault was modified.
+6. The vault is decrypted only temporarily in memory after successful verification.

@@ -9,7 +9,7 @@ The usable version will support:
 4. generate a strong random password;
 5. save and load the encrypted vault.
 
-#Planned CLI commands
+# Planned CLI commands
 The planned command-line menu is:
 ```text
 1. Create vault
@@ -24,7 +24,7 @@ The planned command-line menu is:
 ```
 The exact menu may change during implementation, but these commands describe the intended first version.
 
-#Security scope
+# Security scope
 This project will use well-tested cryptographic library functions. 
 **Planned choices:**
 1. password-based key derivation: Argon2id, or PBKDF2-HMAC-SHA-256 if the selected library does not provide Argon2id;
@@ -32,7 +32,7 @@ This project will use well-tested cryptographic library functions.
 3. a unique random salt for the vault and a fresh random nonce for every encryption operation;
 4. no plaintext passwords in the storage file, logs, or error messages!
 
-#Build and run
+# Build and run
 ```bash
 cmake -S . -B build
 cmake --build build

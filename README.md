@@ -1,5 +1,5 @@
 ## Password Manager
-#Project scope
+# Project scope
 The application will be a small local command-line (potentially GUI) password manager for one user. It will store login entries in an encrypted vault.
 
 The usable version will support:

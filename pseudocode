@@ -1,0 +1,164 @@
+START
+    vaultFileExists = check whether the vault file exists
+    vaultUnlocked = false
+    entries = empty
+    encryptionKey = empty
+    userWantsToExit = false
+
+    REPEAT until userWantsToExit is true:
+
+        IF vaultFileExists is false:
+            show "1. Create vault"
+            show "2. Exit"
+            read menuChoice
+
+            IF menuChoice is "1":
+                run CREATE VAULT steps
+
+            ELSE IF menuChoice is "2":
+                userWantsToExit = true
+
+            ELSE:
+                show "Please choose 1 or 2"
+
+        ELSE IF vaultUnlocked is false:
+            show "Vault is locked"
+            show "1. Unlock vault"
+            show "2. Exit"
+            read menuChoice
+
+            IF menuChoice is "1":
+                run UNLOCK VAULT steps
+
+            ELSE IF menuChoice is "2":
+                userWantsToExit = true
+
+            ELSE:
+                show "Please choose 1 or 2"
+
+        ELSE:
+            show "Main menu"
+            show "1. View entries"
+            show "2. Add an entry"
+            show "3. Lock vault"
+            show "4. Save and exit"
+            read menuChoice
+
+            IF menuChoice is "1":
+                run VIEW ENTRIES steps
+
+            ELSE IF menuChoice is "2":
+                run ADD ENTRY steps
+
+            ELSE IF menuChoice is "3":
+                run LOCK VAULT steps
+
+            ELSE IF menuChoice is "4":
+                save the vault in encrypted form
+
+                IF save succeeds:
+                    clear entries and encryptionKey from the session
+                    vaultUnlocked = false
+                    userWantsToExit = true
+                ELSE:
+                    show "Could not save. The vault is still unlocked."
+                    stay in the main menu
+
+            ELSE:
+                show "Please choose a number from the menu"
+
+    show "Program ended"
+
+
+CREATE VAULT:
+    read a new master password without displaying it
+    read the same master password again without displaying it
+    check that the passwords match and pass input validation
+
+    IF the passwords do not match or the input is invalid:
+        show an error
+        return to the locked menu
+
+    ELSE:
+        create a random salt
+        create an encryption key from the master password and salt
+        set entries to empty
+
+        save the empty vault in encrypted form
+
+        IF save succeeds:
+            vaultFileExists = true
+            vaultUnlocked = true
+            show "Vault created and unlocked"
+        ELSE:
+            clear encryptionKey from the session
+            show "Could not create the vault"
+
+
+UNLOCK VAULT:
+    read the master password without displaying it
+    validate the input
+
+    read the saved vault file
+    create an encryption key from the entered password and saved salt
+    try to decrypt the saved entries and verify the authentication tag
+
+    IF decryption and tag verification succeed:
+        load the decrypted entries into memory
+        keep the encryption key for this session
+        vaultUnlocked = true
+        show "Vault unlocked"
+    ELSE:
+        keep vaultUnlocked = false
+        keep entries empty
+        clear the temporary encryption key
+        show "Could not unlock the vault"
+
+
+VIEW ENTRIES:
+    IF vaultUnlocked is false:
+        deny the request
+        show "Vault is locked"
+    ELSE:
+        show each entry's website or service
+        show each entry's username or email
+        show each password as "[hidden]"
+
+
+ADD ENTRY:
+    IF vaultUnlocked is false:
+        deny the request
+        show "Vault is locked"
+    ELSE:
+        read website or service
+        read username or email
+        read password without displaying it
+        check that the required input is valid
+
+        IF the input is valid:
+            add the entry to entries
+            save the vault in encrypted form
+
+            IF save succeeds:
+                show "Entry saved"
+            ELSE:
+                show "Could not save. The vault is still unlocked."
+        ELSE:
+            show "Entry was not added"
+
+
+SAVE VAULT:
+    use the encryption library to encrypt entries with encryptionKey
+    use a new random nonce for this save
+    write the version, salt, KDF settings, nonce,
+        encrypted entries, and authentication tag to the vault file
+    check whether the file was written successfully
+
+
+LOCK VAULT:
+    IF saving the vault succeeds:
+        clear entries and encryptionKey from the session
+        vaultUnlocked = false
+        show "Vault is locked"
+    ELSE:
+        show "Could not save. The vault is still unlocked."

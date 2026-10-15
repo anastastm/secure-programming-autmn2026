@@ -2,6 +2,7 @@
 #include <string>
 #include <vector>
 #include <filesystem>
+#include <sodium.h>
 
 struct Entry
 {
@@ -12,8 +13,16 @@ struct Entry
     std::string notes;
 };
 
+
 int main()
 {
+    if (sodium_init() < 0)
+    {
+        std::cout << "Could not start the crypto library.\n";
+        return 1;
+    }
+
+    std::cout << "Crypto library is ready.\n";
     bool userWantsToExit = false;
     bool vaultFileExists = std::filesystem::exists("vault.json");
     std::vector<Entry> entries;
@@ -27,9 +36,9 @@ int main()
             std::cout << "1. Create vault\n";
             std::cout << "2. Exit\n";
             std::cout << "Choose an option: ";
-    
+
             std::getline(std::cin, menuChoice);
-            
+
             if (menuChoice == "1")
             {
                 std::cout << "Creating the vault will be added next.\n";
@@ -44,7 +53,7 @@ int main()
             }
         }
         else
-            {
+        {
             std::cout << "\nVault is locked\n";
             std::cout << "1. Unlock vault\n";
             std::cout << "2. Exit\n";

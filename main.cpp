@@ -3,6 +3,7 @@
 #include <vector>
 #include <filesystem>
 #include <sodium.h>
+#include <conio.h>
 
 struct Entry
 {
@@ -13,6 +14,42 @@ struct Entry
     std::string notes;
 };
 
+std::string readPassword(const std::string& prompt)
+{
+    std::string password;
+
+    std::cout << prompt;
+
+    while (true)
+    {
+        int key = _getch();
+
+        if (key == '\r')
+        {
+            std::cout << '\n';
+            break;
+        }
+        else if (key == '\b')
+        {
+            if (password.empty() == false)
+            {
+                password.pop_back();
+                std::cout << "\b \b";
+            }
+        }
+        else if (key == 0 || key == 224)
+        {
+            _getch();
+        }
+        else if (key >= 32 && key <= 126) 
+        {
+            password.push_back(static_cast<char>(key));
+            std::cout << '*';
+        }
+    }
+
+    return password;
+}
 
 int main()
 {
@@ -41,7 +78,21 @@ int main()
 
             if (menuChoice == "1")
             {
-                std::cout << "Creating the vault will be added next.\n";
+                std::string masterPassword = readPassword("Choose a master password: ");
+                std::string confirmPassword = readPassword("Type it again: ");
+                
+                if (masterPassword.empty())
+                {
+                    std::cout << "The password cannot be empty.\n";
+                }
+                else if (masterPassword != confirmPassword)
+                {
+                    std::cout << "The passwords do not match. No vault was created.\n";
+                }
+                else
+                {
+                    std::cout << "The passwords match.\n";
+                }
             }
             else if (menuChoice == "2")
             {

@@ -4,6 +4,7 @@
 #include <filesystem>
 #include <sodium.h>
 #include <conio.h>
+#include <fstream>
 
 struct Entry
 {
@@ -41,7 +42,7 @@ std::string readPassword(const std::string& prompt)
         {
             _getch();
         }
-        else if (key >= 32 && key <= 126) 
+        else if (key >= 32 && key <= 126)
         {
             password.push_back(static_cast<char>(key));
             std::cout << '*';
@@ -80,7 +81,7 @@ int main()
             {
                 std::string masterPassword = readPassword("Choose a master password: ");
                 std::string confirmPassword = readPassword("Type it again: ");
-                
+
                 if (masterPassword.empty())
                 {
                     std::cout << "The password cannot be empty.\n";
@@ -91,7 +92,104 @@ int main()
                 }
                 else
                 {
-                    std::cout << "The passwords match.\n";
+                    unsigned char salt[crypto_pwhash_SALTBYTES];
+                    unsigned char vaultKey[crypto_aead_xchacha20poly1305_ietf_KEYBYTES];
+
+                    randombytes_buf(salt, sizeof salt);
+
+                    int keyResult = crypto_pwhash(
+                        vaultKey,
+                        sizeof vaultKey,
+                        masterPassword.c_str(),
+                        static_cast<unsigned long long>(masterPassword.size()),
+                        salt,
+                        crypto_pwhash_OPSLIMIT_INTERACTIVE,
+                        crypto_pwhash_MEMLIMIT_INTERACTIVE,
+                        crypto_pwhash_ALG_ARGON2ID13
+                    );
+
+                    if (keyResult == 0)
+                    {
+                        const std::string emptyVaultData = "[]";
+
+                        unsigned char nonce[crypto_aead_xchacha20poly1305_ietf_NPUBBYTES];
+                        randombytes_buf(nonce, sizeof nonce);
+
+                        std::vector<unsigned char> encryptedData(
+                            emptyVaultData.size() + crypto_aead_xchacha20poly1305_ietf_ABYTES
+                        );
+
+                        unsigned long long encryptedLength = 0;
+
+                        int encryptResult = crypto_aead_xchacha20poly1305_ietf_encrypt(
+                            encryptedData.data(),
+                            &encryptedLength,
+                            reinterpret_cast<const unsigned char*>(emptyVaultData.data()),
+                            static_cast<unsigned long long>(emptyVaultData.size()),
+                            nullptr,
+                            0,
+                            nullptr,
+                            nonce,
+                            vaultKey
+                        );
+
+                        if (encryptResult == 0)
+                        {
+                            encryptedData.resize(static_cast<std::size_t>(encryptedLength));
+
+                            char saltHex[crypto_pwhash_SALTBYTES * 2 + 1];
+                            char nonceHex[crypto_aead_xchacha20poly1305_ietf_NPUBBYTES * 2 + 1];
+
+                            std::vector<char> encryptedHex(encryptedData.size() * 2 + 1);
+
+                            sodium_bin2hex(saltHex, sizeof saltHex, salt, sizeof salt);
+                            sodium_bin2hex(nonceHex, sizeof nonceHex, nonce, sizeof nonce);
+                            sodium_bin2hex(
+                                encryptedHex.data(),
+                                encryptedHex.size(),
+                                encryptedData.data(),
+                                encryptedData.size()
+                            );
+
+                            std::ofstream vaultFile("vault.json", std::ios::binary);
+
+                            if (!vaultFile)
+                            {
+                                std::cout << "Could not create the vault file.\n";
+                            }
+                            else
+                            {
+                                vaultFile << "{\n"
+                                    << "  \"version\": 1,\n"
+                                    << "  \"salt\": \"" << saltHex << "\",\n"
+                                    << "  \"nonce\": \"" << nonceHex << "\",\n"
+                                    << "  \"encrypted_data\": \"" << encryptedHex.data() << "\"\n"
+                                    << "}\n";
+
+                                vaultFile.close();
+
+                                if (vaultFile.fail())
+                                {
+                                    std::cout << "Could not save the vault file.\n";
+                                }
+                                else
+                                {
+                                    vaultFileExists = true;
+                                    std::cout << "Encrypted vault saved to vault.json.\n";
+                                }
+                            }
+                        }
+                        else
+                        {
+                            std::cout << "Could not encrypt the vault data.\n";
+                        }
+                    }
+                    else
+                    {
+                        std::cout << "Could not create the encryption key.\n";
+                    }
+
+                    sodium_memzero(vaultKey, sizeof vaultKey);
                 }
             }
             else if (menuChoice == "2")
@@ -114,8 +212,12 @@ int main()
 
             if (menuChoice == "1")
             {
-                std::cout << "To be added.\n";
+                std::string enteredMasterPassword =
+                    readPassword("Enter your master password: ");
+
+                std::cout << "Password entered.\n";
             }
+
             else if (menuChoice == "2")
             {
                 userWantsToExit = true;

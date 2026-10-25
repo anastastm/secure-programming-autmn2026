@@ -192,6 +192,72 @@ bool unlockVault(
     return true;
 }
 
+void addEntry(std::vector<Entry>& entries)
+{
+    Entry entry;
+
+    std::cout << "Service name: ";
+    std::getline(std::cin, entry.service);
+
+    std::cout << "Website: ";
+    std::getline(std::cin, entry.website);
+
+    std::cout << "Username: ";
+    std::getline(std::cin, entry.username);
+
+    entry.password = readPassword("Password: ");
+
+    std::cout << "Notes: ";
+    std::getline(std::cin, entry.notes);
+
+    if (entry.service.empty() || entry.password.empty())
+    {
+        std::cout << "Service name and password are required.\n";
+
+        if (entry.password.empty() == false)
+        {
+            sodium_memzero(&entry.password[0], entry.password.size());
+        }
+
+        return;
+    }
+
+    entries.push_back(entry);
+    std::cout << "Entry added for this session. It is not saved yet.\n";
+}
+
+void viewEntries(const std::vector<Entry>& entries)
+{
+    if (entries.empty())
+    {
+        std::cout << "There are no entries in this session.\n";
+        return;
+    }
+
+    for (std::size_t i = 0; i < entries.size(); i++)
+    {
+        std::cout << "\nEntry " << i + 1 << "\n";
+        std::cout << "Service: " << entries[i].service << "\n";
+        std::cout << "Website: " << entries[i].website << "\n";
+        std::cout << "Username: " << entries[i].username << "\n";
+        std::cout << "Password: [hidden]\n";
+        std::cout << "Notes: " << entries[i].notes << "\n";
+    }
+}
+
+void clearEntries(std::vector<Entry>& entries)
+{
+    for (Entry& entry : entries)
+    {
+        if (entry.password.empty() == false)
+        {
+            sodium_memzero(&entry.password[0], entry.password.size());
+        }
+    }
+
+    entries.clear();
+}
+
 int main()
 {
     if (sodium_init() < 0)
@@ -349,15 +415,26 @@ int main()
             else if (vaultUnlocked == true)
             {
                 std::cout << "\nVault is unlocked.\n";
-                std::cout << "Entry actions will be added in the next step.\n";
-                std::cout << "1. Lock vault\n";
-                std::cout << "2. Exit\n";
+                std::cout << "1. Add entry\n";
+                std::cout << "2. View entries\n";
+                std::cout << "3. Lock vault\n";
+                std::cout << "4. Exit\n";
                 std::cout << "Choose an option: ";
 
                 std::getline(std::cin, menuChoice);
 
                 if (menuChoice == "1")
                 {
+                    addEntry(entries);
+                }
+                else if (menuChoice == "2")
+                {
+                    viewEntries(entries);
+                }
+                else if (menuChoice == "3")
+                {
+                    clearEntries(entries);
+
                     sodium_memzero(
                         sessionVaultKey,
                         sizeof sessionVaultKey);
@@ -365,13 +442,13 @@ int main()
                     vaultUnlocked = false;
                     std::cout << "Vault locked.\n";
                 }
-                else if (menuChoice == "2")
+                else if (menuChoice == "4")
                 {
                     userWantsToExit = true;
                 }
                 else
                 {
-                    std::cout << "Please choose 1 or 2.\n";
+                    std::cout << "Please choose 1, 2, 3, or 4.\n";
                 }
             }
             else
@@ -413,6 +490,7 @@ int main()
         }
 
         std::cout << "Program ended.\n";
+        clearEntries(entries);
         sodium_memzero(sessionVaultKey, sizeof sessionVaultKey);
         return 0;
 }

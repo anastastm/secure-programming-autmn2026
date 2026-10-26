@@ -96,3 +96,4 @@ x86/
 # Password Manager sensitive data
 *.vault
 *.key
+/vault.json

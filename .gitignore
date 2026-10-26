@@ -67,3 +67,32 @@ vcpkg_installed/
 # test output & cache
 Testing/
 .cache/
+
+# Visual Studio
+.vs/
+*.VC.db
+*.VC.opendb
+*.VC.db-shm
+*.VC.db-wal
+*.ipch
+*.sqlite
+*.suo
+*.vcxproj.user
+
+# Visual Studio build directories
+Debug/
+Release/
+x64/
+x86/
+
+# Visual Studio generated build files
+*.tlog
+*.idb
+*.lastbuildstate
+*.obj.dt.d.json
+*.obj.dt.module.json
+*.obj.dt.module.json.command
+
+# Password Manager sensitive data
+*.vault
+*.key

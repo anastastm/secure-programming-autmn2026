@@ -5,6 +5,8 @@
 #include <sodium.h>
 #include <conio.h>
 #include <fstream>
+#include <iomanip>
+#include <sstream>
 
 struct Entry
 {
@@ -78,9 +80,194 @@ bool readJsonStringField(
     return true;
 }
 
+std::string serializeEntries(const std::vector<Entry>& entries)
+{
+    std::ostringstream output;
+
+    for (const Entry& entry : entries)
+    {
+        output << std::quoted(entry.service) << ' '
+            << std::quoted(entry.website) << ' '
+            << std::quoted(entry.username) << ' '
+            << std::quoted(entry.password) << ' '
+            << std::quoted(entry.notes) << '\n';
+    }
+
+    return output.str();
+}
+
+bool parseEntries(
+    const std::string& data,
+    std::vector<Entry>& entries)
+{
+    std::vector<Entry> loadedEntries;
+
+    if (data == "[]")
+    {
+        entries.clear();
+        return true;
+    }
+
+    std::istringstream input(data);
+
+    while (true)
+    {
+        Entry entry;
+
+        if (!(input >> std::quoted(entry.service)))
+        {
+            if (input.eof())
+            {
+                break;
+            }
+
+            return false;
+        }
+
+        if (!(input >> std::quoted(entry.website)
+            >> std::quoted(entry.username)
+            >> std::quoted(entry.password)
+            >> std::quoted(entry.notes)))
+        {
+            return false;
+        }
+
+        loadedEntries.push_back(entry);
+    }
+
+    entries = loadedEntries;
+    return true;
+}
+
+bool saveVault(
+    const std::vector<Entry>& entries,
+    const unsigned char vaultKey[])
+{
+    std::ifstream existingFile("vault.json", std::ios::binary);
+
+    if (!existingFile)
+    {
+        std::cout << "Could not open the existing vault file.\n";
+        return false;
+    }
+
+    std::string vaultContents;
+    std::string line;
+
+    while (std::getline(existingFile, line))
+    {
+        vaultContents += line;
+    }
+
+    existingFile.close();
+
+    std::string saltHex;
+
+    if (vaultContents.find("\"version\": 1") == std::string::npos ||
+        readJsonStringField(vaultContents, "salt", saltHex) == false ||
+        saltHex.size() != crypto_pwhash_SALTBYTES * 2)
+    {
+        std::cout << "The vault file is not in the expected format.\n";
+        return false;
+    }
+
+    std::vector<unsigned char> salt(crypto_pwhash_SALTBYTES);
+    std::size_t saltLength = 0;
+
+    if (sodium_hex2bin(
+        salt.data(),
+        salt.size(),
+        saltHex.c_str(),
+        saltHex.size(),
+        nullptr,
+        &saltLength,
+        nullptr) != 0 ||
+        saltLength != salt.size())
+    {
+        std::cout << "The vault file contains an invalid salt.\n";
+        return false;
+    }
+
+    std::string plainData = serializeEntries(entries);
+
+    unsigned char nonce[
+        crypto_aead_xchacha20poly1305_ietf_NPUBBYTES];
+
+    randombytes_buf(nonce, sizeof nonce);
+
+    std::vector<unsigned char> encryptedData(
+        plainData.size() + crypto_aead_xchacha20poly1305_ietf_ABYTES);
+
+    unsigned long long encryptedLength = 0;
+
+    int encryptResult = crypto_aead_xchacha20poly1305_ietf_encrypt(
+        encryptedData.data(),
+        &encryptedLength,
+        reinterpret_cast<const unsigned char*>(plainData.data()),
+        static_cast<unsigned long long>(plainData.size()),
+        nullptr,
+        0,
+        nullptr,
+        nonce,
+        vaultKey);
+
+    if (plainData.empty() == false)
+    {
+        sodium_memzero(&plainData[0], plainData.size());
+    }
+
+    if (encryptResult != 0)
+    {
+        std::cout << "Could not encrypt the entries.\n";
+        return false;
+    }
+
+    encryptedData.resize(static_cast<std::size_t>(encryptedLength));
+
+    char nonceHex[
+        crypto_aead_xchacha20poly1305_ietf_NPUBBYTES * 2 + 1];
+
+    std::vector<char> encryptedHex(encryptedData.size() * 2 + 1);
+
+    sodium_bin2hex(nonceHex, sizeof nonceHex, nonce, sizeof nonce);
+    sodium_bin2hex(
+        encryptedHex.data(),
+        encryptedHex.size(),
+        encryptedData.data(),
+        encryptedData.size());
+
+    std::ofstream vaultFile(
+        "vault.json",
+        std::ios::binary | std::ios::trunc);
+
+    if (!vaultFile)
+    {
+        std::cout << "Could not save the vault file.\n";
+        return false;
+    }
+
+    vaultFile << "{\n"
+        << "  \"version\": 1,\n"
+        << "  \"salt\": \"" << saltHex << "\",\n"
+        << "  \"nonce\": \"" << nonceHex << "\",\n"
+        << "  \"encrypted_data\": \"" << encryptedHex.data() << "\"\n"
+        << "}\n";
+
+    vaultFile.close();
+
+    if (vaultFile.fail())
+    {
+        std::cout << "Could not save the vault file.\n";
+        return false;
+    }
+
+    return true;
+}
+
 bool unlockVault(
     const std::string& masterPassword,
-    unsigned char vaultKey[])
+    unsigned char vaultKey[],
+    std::vector<Entry>& entries)
 {
     std::ifstream vaultFile("vault.json", std::ios::binary);
 
@@ -178,21 +365,49 @@ bool unlockVault(
         nonce.data(),
         vaultKey);
 
-    sodium_memzero(decryptedData.data(), decryptedData.size());
-
     if (decryptResult != 0)
     {
+        sodium_memzero(decryptedData.data(), decryptedData.size());
         sodium_memzero(
             vaultKey,
             crypto_aead_xchacha20poly1305_ietf_KEYBYTES);
-        std::cout << "Incorrect password, or the vault file is dacmaged.\n";
+
+        std::cout << "Incorrect password, or the vault file is damaged.\n";
         return false;
+    }
+
+    std::string plainData(
+        reinterpret_cast<const char*>(decryptedData.data()),
+        static_cast<std::size_t>(decryptedLength));
+
+    sodium_memzero(decryptedData.data(), decryptedData.size());
+
+    if (parseEntries(plainData, entries) == false)
+    {
+        if (plainData.empty() == false)
+        {
+            sodium_memzero(&plainData[0], plainData.size());
+        }
+
+        sodium_memzero(
+            vaultKey,
+            crypto_aead_xchacha20poly1305_ietf_KEYBYTES);
+
+        std::cout << "The decrypted vault data is invalid.\n";
+        return false;
+    }
+
+    if (plainData.empty() == false)
+    {
+        sodium_memzero(&plainData[0], plainData.size());
     }
 
     return true;
 }
 
-void addEntry(std::vector<Entry>& entries)
+void addEntry(
+    std::vector<Entry>& entries,
+    const unsigned char vaultKey[])
 {
     Entry entry;
 
@@ -223,7 +438,21 @@ void addEntry(std::vector<Entry>& entries)
     }
 
     entries.push_back(entry);
-    std::cout << "Entry added for this session. It is not saved yet.\n";
+    bool saved = saveVault(entries, vaultKey);
+
+    if (entry.password.empty() == false)
+    {
+        sodium_memzero(&entry.password[0], entry.password.size());
+    }
+
+    if (saved)
+    {
+        std::cout << "Entry added and saved to the encrypted vault.\n";
+    }
+    else
+    {
+        std::cout << "Could not save the entry. It remains in memory for now.\n";
+    }
 }
 
 void viewEntries(const std::vector<Entry>& entries)
@@ -425,7 +654,7 @@ int main()
 
                 if (menuChoice == "1")
                 {
-                    addEntry(entries);
+                    addEntry(entries, sessionVaultKey);
                 }
                 else if (menuChoice == "2")
                 {
@@ -465,7 +694,7 @@ int main()
                     std::string enteredMasterPassword =
                         readPassword("Enter your master password: ");
 
-                    if (unlockVault(enteredMasterPassword, sessionVaultKey))
+                    if (unlockVault(enteredMasterPassword, sessionVaultKey, entries))
                     {
                         vaultUnlocked = true;
                         std::cout << "Vault unlocked successfully.\n";

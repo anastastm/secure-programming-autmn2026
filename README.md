@@ -1,60 +1,63 @@
 # Password Manager
-## Project scope
-The application will be a small local command-line (potentially GUI) password manager for one user. It will store login entries in an encrypted vault.
 
-The final version will support:
-1. create a vault and set a master password;
-2. unlock and lock the vault;
-3. add, view, edit, delete, and search entries;
-4. generate a strong random password;
-5. save and load the encrypted vault.
+A small command-line password manager written in C++. It stores account entries in a local encrypted vault.
 
-## Project status
+## Current features
 
-This repository presents a conceptual design for a password manager.
-The planned functionality and program flow are described using
-pseudocode. 
+- Create a vault with a master password and confirmation.
+- Hide the master password and entry passwords while they are typed.
+- Unlock and lock the vault with the master password.
+- Add entries containing a service, website, username, password, and notes.
+- View saved entries while keeping their passwords hidden.
+- Save entries in `vault.json` in encrypted form and load them after unlocking the vault.
+- Reject an incorrect master password or damaged encrypted data.
 
-I will make my best effort to use C++ for this project. 
-However, I graduated with a bachelor’s degree in Information Technology in 2023, rather than Computer Science, 
-and I have limited experience with programming and C++. I have not written much code since graduating.
+The vault key is derived from the master password using Argon2id. The entry data is encrypted with XChaCha20-Poly1305 using a new random nonce when the vault is saved. The master password is not stored in the vault file.
 
-My main goal is to understand how to design and write secure code. 
-Because my programming experience is limited, I may use pseudocode to explain the intended logic where 
-I am unable to implement the functionality correctly in C++. 
-Whenever possible, I will implement the functionality in C++ and use pseudocode 
-only to describe parts that I cannot yet implement.
+## Requirements
 
-## Planned CLI commands
-The planned command-line menu is:
-```text
-1. Create vault
-2. Unlock vault
-3. Add entry
-4. View or search entries
-5. Edit entry
-6. Delete entry
-7. Generate password
-8. Lock vault
-9. Save and exit
-```
-The exact menu may change during implementation, but these commands describe the intended first version.
+- Windows and Visual Studio with the **Desktop development with C++** workload.
+- vcpkg and the libsodium package for 64-bit Windows.
 
-## Security scope
-This project will use well-tested cryptographic library functions. 
-**Planned choices:**
-1. password-based key derivation: Argon2id, or PBKDF2-HMAC-SHA-256 if the selected library does not provide Argon2id;
-2. authenticated encryption: AES-256-GCM or ChaCha20-Poly1305;
-3. a unique random salt for the vault and a fresh random nonce for every encryption operation;
-4. no plaintext passwords in the storage file, logs, or error messages!
+The program uses `conio.h` to hide typed passwords, so this version is intended for Windows.
 
-## Planned build and run commands
-Create a virtual environment:
-```bash
-cmake -S . -B build
-cmake --build build
-./build/password_manager
-```
+## Build and run in Visual Studio
 
-On Windows, the executable may be located at `build\Debug\password_manager.exe` after building with Visual Studio.
-The current executable is only a project skeleton and prints a short status message. The features listed above are planned functionality. They will be implemented incrementally, starting with the data model and file handling before adding cryptography through a library.
+1. Install vcpkg if it is not already installed. Follow the official vcpkg setup instructions and note the folder where you installed it.
+2. Open a terminal in that vcpkg folder and run:
+
+   ```powershell
+   .\vcpkg.exe install libsodium:x64-windows
+   .\vcpkg.exe integrate install
+   ```
+
+3. Close and reopen Visual Studio if it was already open.
+4. Open `secure-programming.sln`.
+5. Select **Debug** and **x64** in the Visual Studio toolbar.
+6. Build with **Build → Build Solution**.
+7. Run with **Debug → Start Without Debugging** (or press `Ctrl+F5`).
+
+The project is configured for C++17 in the Debug x64 configuration. If Visual Studio still cannot find `sodium.h`, check that the `libsodium:x64-windows` package installed successfully and that vcpkg integration completed.
+
+## First use and basic test
+
+1. Choose **Create vault** and set a master password.
+2. Unlock the vault, add a test entry, and lock the vault.
+3. Close and reopen the program, unlock the vault, and view the entry.
+4. Open `vault.json` in a text editor. The service, username, password, and notes should not appear as readable text.
+5. Try an incorrect master password; the vault should remain locked.
+
+`vault.json` is created in the program's current working directory. Keep your own vault file private and do not commit it to Git or include it in a project submission. Add `vault.json` to `.gitignore` so it is not accidentally committed.
+
+## Current limits
+
+This checkpoint version supports adding and viewing entries. It does not yet support editing, deleting, searching, revealing a saved password, generating passwords, or automatically locking after inactivity. It is a course project and is not intended to replace a professionally reviewed password manager.
+
+## Project files
+
+- `main.cpp` — the C++ program.
+- `pseudocode` — the planned program flow.
+- `Use-cases` — user and misuse cases.
+- `threat_model_passmanager.md` — security threats and planned protections.
+- `vault_format_cryptographic_scheme` — description of the vault format and encryption design.
+- `PassManager.drawio` and `PassManager.drawio.png` — architecture diagram and its image.

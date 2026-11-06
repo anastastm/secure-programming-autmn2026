@@ -3,7 +3,12 @@
 #include <vector>
 #include <filesystem>
 #include <sodium.h>
+#ifdef _WIN32
 #include <conio.h>
+#else
+#include <termios.h>
+#include <unistd.h>
+#endif
 #include <fstream>
 #include <iomanip>
 #include <sstream>
@@ -20,37 +25,69 @@ struct Entry
 std::string readPassword(const std::string& prompt)
 {
     std::string password;
+    std::cout << prompt << std::flush;
 
-    std::cout << prompt;
+#ifndef _WIN32
+    termios originalSettings{};
+    if (!isatty(STDIN_FILENO) || tcgetattr(STDIN_FILENO, &originalSettings) != 0)
+    {
+        std::cout << "Password input requires an interactive terminal.\n";
+        return password;
+    }
+
+    termios hiddenSettings = originalSettings;
+    hiddenSettings.c_lflag &= static_cast<tcflag_t>(~(ECHO | ICANON));
+    hiddenSettings.c_cc[VMIN] = 1;
+    hiddenSettings.c_cc[VTIME] = 0;
+
+    if (tcsetattr(STDIN_FILENO, TCSAFLUSH, &hiddenSettings) != 0)
+    {
+        std::cout << "Could not configure hidden password input.\n";
+        return password;
+    }
+#endif
 
     while (true)
     {
+#ifdef _WIN32
         int key = _getch();
-
-        if (key == '\r')
+#else
+        int key = std::cin.get();
+#endif
+        if (key == EOF)
         {
-            std::cout << '\n';
             break;
         }
-        else if (key == '\b')
+
+        if (key == '\r' || key == '\n')
         {
-            if (password.empty() == false)
+            break;
+        }
+        else if (key == '\b' || key == 127)
+        {
+            if (!password.empty())
             {
                 password.pop_back();
-                std::cout << "\b \b";
+                std::cout << "\b \b" << std::flush;
             }
         }
+#ifdef _WIN32
         else if (key == 0 || key == 224)
         {
-            _getch();
+            _getch(); // Consume the second byte of a Windows special key.
         }
+#endif
         else if (key >= 32 && key <= 126)
         {
             password.push_back(static_cast<char>(key));
-            std::cout << '*';
+            std::cout << '*' << std::flush;
         }
     }
 
+#ifndef _WIN32
+    tcsetattr(STDIN_FILENO, TCSAFLUSH, &originalSettings);
+#endif
+    std::cout << '\n';
     return password;
 }
 

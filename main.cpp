@@ -63,6 +63,34 @@ struct Entry
     std::string notes;
 };
 
+void clearString(std::string& value)
+{
+    if (!value.empty())
+    {
+        sodium_memzero(value.data(), value.size());
+        value.clear();
+    }
+}
+
+void clearEntry(Entry& entry)
+{
+    clearString(entry.service);
+    clearString(entry.website);
+    clearString(entry.username);
+    clearString(entry.password);
+    clearString(entry.notes);
+}
+
+void wipeEntries(std::vector<Entry>& entries)
+{
+    for (Entry& entry : entries)
+    {
+        clearEntry(entry);
+    }
+
+    entries.clear();
+}
+
 std::string readPassword(const std::string& prompt)
 {
     std::string password;
@@ -140,12 +168,7 @@ std::string readPassword(const std::string& prompt)
 
     if (tooLong)
     {
-        if (!password.empty())
-        {
-            sodium_memzero(password.data(), password.size());
-            password.clear();
-        }
-
+        clearString(password);
         std::cout << "Password is too long. Maximum length is 256 characters.\n";
         return {};
     }
@@ -203,7 +226,7 @@ bool parseEntries(
 
     if (data == "[]")
     {
-        entries.clear();
+        wipeEntries(entries);
         return true;
     }
 
@@ -220,6 +243,7 @@ bool parseEntries(
                 break;
             }
 
+            wipeEntries(loadedEntries);
             return false;
         }
 
@@ -228,11 +252,8 @@ bool parseEntries(
             >> std::quoted(entry.password)
             >> std::quoted(entry.notes)))
         {
-            if (!entry.password.empty())
-            {
-                sodium_memzero(entry.password.data(), entry.password.size());
-            }
-
+            clearEntry(entry);
+            wipeEntries(loadedEntries);
             return false;
         }
 
@@ -242,18 +263,18 @@ bool parseEntries(
             !isValidField(entry.notes, 2048, false) ||
             !isValidField(entry.password, MAX_PASSWORD_LENGTH, true))
         {
-            if (!entry.password.empty())
-            {
-                sodium_memzero(entry.password.data(), entry.password.size());
-            }
-
+            clearEntry(entry);
+            wipeEntries(loadedEntries);
             return false;
         }
 
         loadedEntries.push_back(entry);
+        clearEntry(entry);
     }
 
+    wipeEntries(entries);
     entries = loadedEntries;
+    wipeEntries(loadedEntries);
     return true;
 }
 
@@ -557,11 +578,7 @@ bool unlockVault(
 
     if (parseEntries(plainData, entries) == false)
     {
-        if (plainData.empty() == false)
-        {
-            sodium_memzero(&plainData[0], plainData.size());
-        }
-
+        clearString(plainData);
         sodium_memzero(
             vaultKey,
             crypto_aead_xchacha20poly1305_ietf_KEYBYTES);
@@ -570,10 +587,7 @@ bool unlockVault(
         return false;
     }
 
-    if (plainData.empty() == false)
-    {
-        sodium_memzero(&plainData[0], plainData.size());
-    }
+    clearString(plainData);
 
     return true;
 }
@@ -604,12 +618,7 @@ void addEntry(
         !isValidField(entry.notes, 2048, false) ||
         !isValidField(entry.password, MAX_PASSWORD_LENGTH, true))
     {
-        if (!entry.password.empty())
-        {
-            sodium_memzero(entry.password.data(), entry.password.size());
-            entry.password.clear();
-        }
-
+        clearEntry(entry);
         std::cout << "Invalid entry. Check required fields, length limits, and control characters.\n";
         logEvent("entry_add", "validation_failed");
         return;
@@ -617,21 +626,11 @@ void addEntry(
 
     entries.push_back(entry);
 
-    if (!entry.password.empty())
-    {
-        sodium_memzero(entry.password.data(), entry.password.size());
-        entry.password.clear();
-    }
+    clearEntry(entry);
 
     if (!saveVault(entries, vaultKey))
     {
-        std::string& unsavedPassword = entries.back().password;
-        if (!unsavedPassword.empty())
-        {
-            sodium_memzero(unsavedPassword.data(), unsavedPassword.size());
-            unsavedPassword.clear();
-        }
-
+        clearEntry(entries.back());
         entries.pop_back();
         std::cout << "Could not save the entry. It was not added.\n";
         logEvent("entry_add", "save_failed");
@@ -662,15 +661,7 @@ void viewEntries(const std::vector<Entry>& entries)
 
 void clearEntries(std::vector<Entry>& entries)
 {
-    for (Entry& entry : entries)
-    {
-        if (entry.password.empty() == false)
-        {
-            sodium_memzero(&entry.password[0], entry.password.size());
-        }
-    }
-
-    entries.clear();
+    wipeEntries(entries);
 }
 
 int main()
@@ -836,14 +827,12 @@ int main()
                     }
                     if (!masterPassword.empty())
                     {
-                        sodium_memzero(masterPassword.data(), masterPassword.size());
-                        masterPassword.clear();
+                        clearString(masterPassword);
                     }
 
                     if (!confirmPassword.empty())
                     {
-                        sodium_memzero(confirmPassword.data(), confirmPassword.size());
-                        confirmPassword.clear();
+                        clearString(confirmPassword);
                     }
                 }
                 else if (menuChoice == "2")
@@ -922,9 +911,7 @@ int main()
 
                     if (enteredMasterPassword.empty() == false)
                     {
-                        sodium_memzero(
-                            &enteredMasterPassword[0],
-                            enteredMasterPassword.size());
+                        clearString(enteredMasterPassword);
                     }
                 }
                 else if (menuChoice == "2")

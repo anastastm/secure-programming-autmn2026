@@ -12,6 +12,31 @@
 #include <fstream>
 #include <iomanip>
 #include <sstream>
+#include <cstddef>
+#include <system_error>
+
+constexpr std::size_t MAX_PASSWORD_LENGTH = 256;
+
+bool isValidField(
+    const std::string& value,
+    std::size_t maxLength,
+    bool required)
+{
+    if ((required && value.empty()) || value.size() > maxLength)
+    {
+        return false;
+    }
+
+    for (unsigned char character : value)
+    {
+        if (character < 32 || character == 127)
+        {
+            return false;
+        }
+    }
+
+    return true;
+}
 
 struct Entry
 {
@@ -25,6 +50,7 @@ struct Entry
 std::string readPassword(const std::string& prompt)
 {
     std::string password;
+    bool tooLong = false;
     std::cout << prompt << std::flush;
 
 #ifndef _WIN32
@@ -79,8 +105,15 @@ std::string readPassword(const std::string& prompt)
 #endif
         else if (key >= 32 && key <= 126)
         {
-            password.push_back(static_cast<char>(key));
-            std::cout << '*' << std::flush;
+            if (password.size() < MAX_PASSWORD_LENGTH)
+            {
+                password.push_back(static_cast<char>(key));
+                std::cout << '*' << std::flush;
+            }
+            else
+            {
+                tooLong = true;
+            }
         }
     }
 
@@ -88,6 +121,19 @@ std::string readPassword(const std::string& prompt)
     tcsetattr(STDIN_FILENO, TCSAFLUSH, &originalSettings);
 #endif
     std::cout << '\n';
+
+    if (tooLong)
+    {
+        if (!password.empty())
+        {
+            sodium_memzero(password.data(), password.size());
+            password.clear();
+        }
+
+        std::cout << "Password is too long. Maximum length is 256 characters.\n";
+        return {};
+    }
+
     return password;
 }
 
@@ -273,8 +319,12 @@ bool saveVault(
         encryptedData.data(),
         encryptedData.size());
 
+    const std::filesystem::path vaultPath = "vault.json";
+    const std::filesystem::path tempPath = "vault.json.tmp";
+    const std::filesystem::path backupPath = "vault.json.bak";
+
     std::ofstream vaultFile(
-        "vault.json",
+        tempPath,
         std::ios::binary | std::ios::trunc);
 
     if (!vaultFile)
@@ -294,10 +344,43 @@ bool saveVault(
 
     if (vaultFile.fail())
     {
+        std::error_code cleanupError;
+        std::filesystem::remove(tempPath, cleanupError);
         std::cout << "Could not save the vault file.\n";
         return false;
     }
 
+    std::error_code fileError;
+    std::filesystem::remove(backupPath, fileError);
+
+    if (fileError)
+    {
+        std::filesystem::remove(tempPath, fileError);
+        std::cout << "Could not prepare the vault file for saving.\n";
+        return false;
+    }
+
+    std::filesystem::rename(vaultPath, backupPath, fileError);
+
+    if (fileError)
+    {
+        std::filesystem::remove(tempPath, fileError);
+        std::cout << "Could not prepare the vault file for saving.\n";
+        return false;
+    }
+
+    std::filesystem::rename(tempPath, vaultPath, fileError);
+
+    if (fileError)
+    {
+        std::error_code restoreError;
+        std::filesystem::rename(backupPath, vaultPath, restoreError);
+        std::filesystem::remove(tempPath, fileError);
+        std::cout << "Could not save the vault file.\n";
+        return false;
+    }
+
+    std::filesystem::remove(backupPath, fileError);
     return true;
 }
 
@@ -462,34 +545,44 @@ void addEntry(
     std::cout << "Notes: ";
     std::getline(std::cin, entry.notes);
 
-    if (entry.service.empty() || entry.password.empty())
+    if (!isValidField(entry.service, 100, true) ||
+        !isValidField(entry.website, 2048, false) ||
+        !isValidField(entry.username, 256, false) ||
+        !isValidField(entry.notes, 2048, false) ||
+        !isValidField(entry.password, MAX_PASSWORD_LENGTH, true))
     {
-        std::cout << "Service name and password are required.\n";
-
-        if (entry.password.empty() == false)
+        if (!entry.password.empty())
         {
-            sodium_memzero(&entry.password[0], entry.password.size());
+            sodium_memzero(entry.password.data(), entry.password.size());
+            entry.password.clear();
         }
 
+        std::cout << "Invalid entry. Check required fields, length limits, and control characters.\n";
         return;
     }
 
     entries.push_back(entry);
-    bool saved = saveVault(entries, vaultKey);
 
-    if (entry.password.empty() == false)
+    if (!entry.password.empty())
     {
-        sodium_memzero(&entry.password[0], entry.password.size());
+        sodium_memzero(entry.password.data(), entry.password.size());
+        entry.password.clear();
     }
 
-    if (saved)
+    if (!saveVault(entries, vaultKey))
     {
-        std::cout << "Entry added and saved to the encrypted vault.\n";
+        std::string& unsavedPassword = entries.back().password;
+        if (!unsavedPassword.empty())
+        {
+            sodium_memzero(unsavedPassword.data(), unsavedPassword.size());
+            unsavedPassword.clear();
+        }
+
+        entries.pop_back();
+        std::cout << "Could not save the entry. It was not added.\n";
+        return;
     }
-    else
-    {
-        std::cout << "Could not save the entry. It remains in memory for now.\n";
-    }
+    std::cout << "Entry added and saved to the encrypted vault.\n";
 }
 
 void viewEntries(const std::vector<Entry>& entries)
@@ -538,6 +631,22 @@ int main()
 
     unsigned char sessionVaultKey[
         crypto_aead_xchacha20poly1305_ietf_KEYBYTES] = {};
+
+        if (!std::filesystem::exists("vault.json") &&
+            std::filesystem::exists("vault.json.bak"))
+        {
+            std::error_code recoveryError;
+            std::filesystem::rename(
+                "vault.json.bak",
+                "vault.json",
+                recoveryError);
+
+            if (recoveryError)
+            {
+                std::cout << "Could not recover the vault file.\n";
+                return 1;
+            }
+        }
 
         bool vaultFileExists = std::filesystem::exists("vault.json");
         std::vector<Entry> entries;
@@ -667,6 +776,17 @@ int main()
                         }
 
                         sodium_memzero(vaultKey, sizeof vaultKey);
+                    }
+                    if (!masterPassword.empty())
+                    {
+                        sodium_memzero(masterPassword.data(), masterPassword.size());
+                        masterPassword.clear();
+                    }
+
+                    if (!confirmPassword.empty())
+                    {
+                        sodium_memzero(confirmPassword.data(), confirmPassword.size());
+                        confirmPassword.clear();
                     }
                 }
                 else if (menuChoice == "2")

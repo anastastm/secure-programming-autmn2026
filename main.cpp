@@ -17,6 +17,16 @@
 
 constexpr std::size_t MAX_PASSWORD_LENGTH = 256;
 
+constexpr unsigned long long MAX_VAULT_FILE_SIZE =
+16ULL * 1024ULL * 1024ULL;
+
+bool isVaultFileSizeAllowed(const std::filesystem::path& path)
+{
+    std::error_code error;
+    const auto size = std::filesystem::file_size(path, error);
+    return !error && size <= MAX_VAULT_FILE_SIZE;
+}
+
 bool isValidField(
     const std::string& value,
     std::size_t maxLength,
@@ -36,6 +46,12 @@ bool isValidField(
     }
 
     return true;
+}
+
+void logEvent(const char* event, const char* result)
+{
+    std::clog << "{\"event\":\"" << event
+        << "\",\"result\":\"" << result << "\"}\n";
 }
 
 struct Entry
@@ -212,6 +228,25 @@ bool parseEntries(
             >> std::quoted(entry.password)
             >> std::quoted(entry.notes)))
         {
+            if (!entry.password.empty())
+            {
+                sodium_memzero(entry.password.data(), entry.password.size());
+            }
+
+            return false;
+        }
+
+        if (!isValidField(entry.service, 100, true) ||
+            !isValidField(entry.website, 2048, false) ||
+            !isValidField(entry.username, 256, false) ||
+            !isValidField(entry.notes, 2048, false) ||
+            !isValidField(entry.password, MAX_PASSWORD_LENGTH, true))
+        {
+            if (!entry.password.empty())
+            {
+                sodium_memzero(entry.password.data(), entry.password.size());
+            }
+
             return false;
         }
 
@@ -226,6 +261,12 @@ bool saveVault(
     const std::vector<Entry>& entries,
     const unsigned char vaultKey[])
 {
+    if (!isVaultFileSizeAllowed("vault.json"))
+    {
+        std::cout << "The vault file is missing, too large, or unavailable.\n";
+        return false;
+    }
+
     std::ifstream existingFile("vault.json", std::ios::binary);
 
     if (!existingFile)
@@ -319,6 +360,12 @@ bool saveVault(
         encryptedData.data(),
         encryptedData.size());
 
+    if (encryptedHex.size() > MAX_VAULT_FILE_SIZE - 256)
+    {
+        std::cout << "The vault is too large to save.\n";
+        return false;
+    }
+
     const std::filesystem::path vaultPath = "vault.json";
     const std::filesystem::path tempPath = "vault.json.tmp";
     const std::filesystem::path backupPath = "vault.json.bak";
@@ -389,6 +436,12 @@ bool unlockVault(
     unsigned char vaultKey[],
     std::vector<Entry>& entries)
 {
+    if (!isVaultFileSizeAllowed("vault.json"))
+    {
+        std::cout << "The vault file is missing, too large, or unavailable.\n";
+        return false;
+    }
+
     std::ifstream vaultFile("vault.json", std::ios::binary);
 
     if (!vaultFile)
@@ -558,6 +611,7 @@ void addEntry(
         }
 
         std::cout << "Invalid entry. Check required fields, length limits, and control characters.\n";
+        logEvent("entry_add", "validation_failed");
         return;
     }
 
@@ -580,9 +634,11 @@ void addEntry(
 
         entries.pop_back();
         std::cout << "Could not save the entry. It was not added.\n";
+        logEvent("entry_add", "save_failed");
         return;
     }
     std::cout << "Entry added and saved to the encrypted vault.\n";
+    logEvent("entry_add", "success");
 }
 
 void viewEntries(const std::vector<Entry>& entries)
@@ -762,6 +818,7 @@ int main()
                                     {
                                         vaultFileExists = true;
                                         std::cout << "Encrypted vault saved to vault.json.\n";
+                                        logEvent("vault_create", "success");
                                     }
                                 }
                             }
@@ -827,6 +884,7 @@ int main()
 
                     vaultUnlocked = false;
                     std::cout << "Vault locked.\n";
+                    logEvent("vault_lock", "success");
                 }
                 else if (menuChoice == "4")
                 {
@@ -855,6 +913,11 @@ int main()
                     {
                         vaultUnlocked = true;
                         std::cout << "Vault unlocked successfully.\n";
+                        logEvent("vault_unlock", "success");
+                    }
+                    else
+                    {
+                        logEvent("vault_unlock", "failure");
                     }
 
                     if (enteredMasterPassword.empty() == false)

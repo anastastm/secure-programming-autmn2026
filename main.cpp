@@ -15,7 +15,7 @@
 #include <cstddef>
 #include <system_error>
 
-constexpr std::size_t MAX_PASSWORD_LENGTH = 256;
+#include "input_validation.h"
 
 constexpr unsigned long long MAX_VAULT_FILE_SIZE =
 16ULL * 1024ULL * 1024ULL;
@@ -25,27 +25,6 @@ bool isVaultFileSizeAllowed(const std::filesystem::path& path)
     std::error_code error;
     const auto size = std::filesystem::file_size(path, error);
     return !error && size <= MAX_VAULT_FILE_SIZE;
-}
-
-bool isValidField(
-    const std::string& value,
-    std::size_t maxLength,
-    bool required)
-{
-    if ((required && value.empty()) || value.size() > maxLength)
-    {
-        return false;
-    }
-
-    for (unsigned char character : value)
-    {
-        if (character < 32 || character == 127)
-        {
-            return false;
-        }
-    }
-
-    return true;
 }
 
 void logEvent(const char* event, const char* result)
@@ -62,15 +41,6 @@ struct Entry
     std::string password;
     std::string notes;
 };
-
-void clearString(std::string& value)
-{
-    if (!value.empty())
-    {
-        sodium_memzero(value.data(), value.size());
-        value.clear();
-    }
-}
 
 void clearEntry(Entry& entry)
 {
@@ -95,6 +65,8 @@ std::string readPassword(const std::string& prompt)
 {
     std::string password;
     bool tooLong = false;
+    bool invalidCharacter = false;
+    password.reserve(MAX_PASSWORD_LENGTH);
     std::cout << prompt << std::flush;
 
 #ifndef _WIN32
@@ -124,8 +96,16 @@ std::string readPassword(const std::string& prompt)
 #else
         int key = std::cin.get();
 #endif
-        if (key == EOF)
+        if (key == EOF
+#ifdef _WIN32
+            || key == 26
+#else
+            || key == 4
+#endif
+            )
         {
+            clearString(password);
+            std::cin.setstate(std::ios::eofbit);
             break;
         }
 
@@ -137,6 +117,7 @@ std::string readPassword(const std::string& prompt)
         {
             if (!password.empty())
             {
+                sodium_memzero(&password.back(), 1);
                 password.pop_back();
                 std::cout << "\b \b" << std::flush;
             }
@@ -144,7 +125,8 @@ std::string readPassword(const std::string& prompt)
 #ifdef _WIN32
         else if (key == 0 || key == 224)
         {
-            _getch(); // Consume the second byte of a Windows special key.
+            _getch();
+            invalidCharacter = true;
         }
 #endif
         else if (key >= 32 && key <= 126)
@@ -159,6 +141,10 @@ std::string readPassword(const std::string& prompt)
                 tooLong = true;
             }
         }
+        else
+        {
+            invalidCharacter = true;
+        }
     }
 
 #ifndef _WIN32
@@ -171,6 +157,12 @@ std::string readPassword(const std::string& prompt)
         clearString(password);
         std::cout << "Password is too long. Maximum length is 256 characters.\n";
         return {};
+    }
+
+    if (invalidCharacter)
+    {
+        clearString(password);
+        std::cout << "Use printable ASCII characters and spaces for passwords.\n";
     }
 
     return password;
@@ -592,35 +584,66 @@ bool unlockVault(
     return true;
 }
 
+bool readEntryField(
+    const char* prompt,
+    std::string& value,
+    std::size_t maxLength,
+    bool required)
+{
+    std::cout << prompt << std::flush;
+    InputResult result = readBoundedLine(std::cin, value, maxLength);
+
+    if (result == InputResult::endOfInput)
+    {
+        return false;
+    }
+
+    if (result == InputResult::tooLong ||
+        !isValidField(value, maxLength, required))
+    {
+        clearString(value);
+        std::cout << "Invalid field. Maximum length: " << maxLength
+            << " bytes. Control characters are not allowed.";
+        if (required)
+        {
+            std::cout << " A non-blank value is required.";
+        }
+        std::cout << '\n';
+        return false;
+    }
+
+    return true;
+}
+
 void addEntry(
     std::vector<Entry>& entries,
     const unsigned char vaultKey[])
 {
     Entry entry;
 
-    std::cout << "Service name: ";
-    std::getline(std::cin, entry.service);
-
-    std::cout << "Website: ";
-    std::getline(std::cin, entry.website);
-
-    std::cout << "Username: ";
-    std::getline(std::cin, entry.username);
+    if (!readEntryField("Service name: ", entry.service, 100, true) ||
+        !readEntryField("Website: ", entry.website, 2048, false) ||
+        !readEntryField("Username: ", entry.username, 256, false))
+    {
+        clearEntry(entry);
+        logEvent("entry_add", "input_rejected");
+        return;
+    }
 
     entry.password = readPassword("Password: ");
 
-    std::cout << "Notes: ";
-    std::getline(std::cin, entry.notes);
-
-    if (!isValidField(entry.service, 100, true) ||
-        !isValidField(entry.website, 2048, false) ||
-        !isValidField(entry.username, 256, false) ||
-        !isValidField(entry.notes, 2048, false) ||
-        !isValidField(entry.password, MAX_PASSWORD_LENGTH, true))
+    if (!std::cin || !isValidPassword(entry.password))
     {
         clearEntry(entry);
-        std::cout << "Invalid entry. Check required fields, length limits, and control characters.\n";
+        std::cout << "The entry password must contain 1-256 printable ASCII characters, not only spaces.\n";
         logEvent("entry_add", "validation_failed");
+        return;
+    }
+
+    if (!readEntryField("Notes: ", entry.notes, 2048, false))
+    {
+        clearEntry(entry);
+        logEvent("entry_add", "input_rejected");
         return;
     }
 
@@ -699,7 +722,7 @@ int main()
         std::vector<Entry> entries;
         std::string menuChoice;
 
-        while (userWantsToExit == false)
+        while (userWantsToExit == false && std::cin)
         {
             if (vaultFileExists == false)
             {
@@ -708,18 +731,37 @@ int main()
                 std::cout << "2. Exit\n";
                 std::cout << "Choose an option: ";
 
-                std::getline(std::cin, menuChoice);
+                if (readBoundedLine(std::cin, menuChoice, 1) == InputResult::endOfInput)
+                {
+                    break;
+                }
 
                 if (menuChoice == "1")
                 {
                     std::string masterPassword = readPassword("Choose a master password: ");
-                    std::string confirmPassword = readPassword("Type it again: ");
-
-                    if (masterPassword.empty())
+                    if (!std::cin)
                     {
-                        std::cout << "The password cannot be empty.\n";
+                        clearString(masterPassword);
+                        break;
                     }
-                    else if (masterPassword != confirmPassword)
+
+                    if (!isValidNewMasterPassword(masterPassword))
+                    {
+                        clearString(masterPassword);
+                        std::cout << "Use 15-256 printable ASCII characters, not only spaces. A long, unique passphrase is recommended.\n";
+                        logEvent("vault_create", "validation_failed");
+                        continue;
+                    }
+
+                    std::string confirmPassword = readPassword("Type it again: ");
+                    if (!std::cin)
+                    {
+                        clearString(masterPassword);
+                        clearString(confirmPassword);
+                        break;
+                    }
+
+                    if (masterPassword != confirmPassword)
                     {
                         std::cout << "The passwords do not match. No vault was created.\n";
                     }
@@ -853,7 +895,10 @@ int main()
                 std::cout << "4. Exit\n";
                 std::cout << "Choose an option: ";
 
-                std::getline(std::cin, menuChoice);
+                if (readBoundedLine(std::cin, menuChoice, 1) == InputResult::endOfInput)
+                {
+                    break;
+                }
 
                 if (menuChoice == "1")
                 {
@@ -891,12 +936,29 @@ int main()
                 std::cout << "2. Exit\n";
                 std::cout << "Choose an option: ";
 
-                std::getline(std::cin, menuChoice);
+                if (readBoundedLine(std::cin, menuChoice, 1) == InputResult::endOfInput)
+                {
+                    break;
+                }
 
                 if (menuChoice == "1")
                 {
                     std::string enteredMasterPassword =
                         readPassword("Enter your master password: ");
+
+                    if (!std::cin)
+                    {
+                        clearString(enteredMasterPassword);
+                        break;
+                    }
+
+                    if (!isValidPassword(enteredMasterPassword))
+                    {
+                        clearString(enteredMasterPassword);
+                        std::cout << "Enter a non-blank master password of at most 256 printable ASCII characters.\n";
+                        logEvent("vault_unlock", "validation_failed");
+                        continue;
+                    }
 
                     if (unlockVault(enteredMasterPassword, sessionVaultKey, entries))
                     {

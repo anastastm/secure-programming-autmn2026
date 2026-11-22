@@ -1,6 +1,7 @@
 #include <iostream>
 #include <string>
 #include <vector>
+#include <deque>
 #include <filesystem>
 #include <sodium.h>
 #ifdef _WIN32
@@ -10,12 +11,12 @@
 #include <unistd.h>
 #endif
 #include <fstream>
-#include <iomanip>
-#include <sstream>
 #include <cstddef>
 #include <system_error>
 
 #include "input_validation.h"
+#include "secret_cleanup.h"
+#include "vault_records.h"
 
 constexpr unsigned long long MAX_VAULT_FILE_SIZE =
 16ULL * 1024ULL * 1024ULL;
@@ -33,37 +34,9 @@ void logEvent(const char* event, const char* result)
         << "\",\"result\":\"" << result << "\"}\n";
 }
 
-struct Entry
+void readPassword(const char* prompt, std::string& password)
 {
-    std::string service;
-    std::string website;
-    std::string username;
-    std::string password;
-    std::string notes;
-};
-
-void clearEntry(Entry& entry)
-{
-    clearString(entry.service);
-    clearString(entry.website);
-    clearString(entry.username);
-    clearString(entry.password);
-    clearString(entry.notes);
-}
-
-void wipeEntries(std::vector<Entry>& entries)
-{
-    for (Entry& entry : entries)
-    {
-        clearEntry(entry);
-    }
-
-    entries.clear();
-}
-
-std::string readPassword(const std::string& prompt)
-{
-    std::string password;
+    clearString(password);
     bool tooLong = false;
     bool invalidCharacter = false;
     password.reserve(MAX_PASSWORD_LENGTH);
@@ -74,7 +47,7 @@ std::string readPassword(const std::string& prompt)
     if (!isatty(STDIN_FILENO) || tcgetattr(STDIN_FILENO, &originalSettings) != 0)
     {
         std::cout << "Password input requires an interactive terminal.\n";
-        return password;
+        return;
     }
 
     termios hiddenSettings = originalSettings;
@@ -85,7 +58,7 @@ std::string readPassword(const std::string& prompt)
     if (tcsetattr(STDIN_FILENO, TCSAFLUSH, &hiddenSettings) != 0)
     {
         std::cout << "Could not configure hidden password input.\n";
-        return password;
+        return;
     }
 #endif
 
@@ -156,7 +129,7 @@ std::string readPassword(const std::string& prompt)
     {
         clearString(password);
         std::cout << "Password is too long. Maximum length is 256 characters.\n";
-        return {};
+        return;
     }
 
     if (invalidCharacter)
@@ -164,8 +137,6 @@ std::string readPassword(const std::string& prompt)
         clearString(password);
         std::cout << "Use printable ASCII characters and spaces for passwords.\n";
     }
-
-    return password;
 }
 
 bool readJsonStringField(
@@ -194,84 +165,8 @@ bool readJsonStringField(
     return true;
 }
 
-std::string serializeEntries(const std::vector<Entry>& entries)
-{
-    std::ostringstream output;
-
-    for (const Entry& entry : entries)
-    {
-        output << std::quoted(entry.service) << ' '
-            << std::quoted(entry.website) << ' '
-            << std::quoted(entry.username) << ' '
-            << std::quoted(entry.password) << ' '
-            << std::quoted(entry.notes) << '\n';
-    }
-
-    return output.str();
-}
-
-bool parseEntries(
-    const std::string& data,
-    std::vector<Entry>& entries)
-{
-    std::vector<Entry> loadedEntries;
-
-    if (data == "[]")
-    {
-        wipeEntries(entries);
-        return true;
-    }
-
-    std::istringstream input(data);
-
-    while (true)
-    {
-        Entry entry;
-
-        if (!(input >> std::quoted(entry.service)))
-        {
-            if (input.eof())
-            {
-                break;
-            }
-
-            wipeEntries(loadedEntries);
-            return false;
-        }
-
-        if (!(input >> std::quoted(entry.website)
-            >> std::quoted(entry.username)
-            >> std::quoted(entry.password)
-            >> std::quoted(entry.notes)))
-        {
-            clearEntry(entry);
-            wipeEntries(loadedEntries);
-            return false;
-        }
-
-        if (!isValidField(entry.service, 100, true) ||
-            !isValidField(entry.website, 2048, false) ||
-            !isValidField(entry.username, 256, false) ||
-            !isValidField(entry.notes, 2048, false) ||
-            !isValidField(entry.password, MAX_PASSWORD_LENGTH, true))
-        {
-            clearEntry(entry);
-            wipeEntries(loadedEntries);
-            return false;
-        }
-
-        loadedEntries.push_back(entry);
-        clearEntry(entry);
-    }
-
-    wipeEntries(entries);
-    entries = loadedEntries;
-    wipeEntries(loadedEntries);
-    return true;
-}
-
 bool saveVault(
-    const std::vector<Entry>& entries,
+    const std::deque<Entry>& entries,
     const unsigned char vaultKey[])
 {
     if (!isVaultFileSizeAllowed("vault.json"))
@@ -326,6 +221,7 @@ bool saveVault(
     }
 
     std::string plainData = serializeEntries(entries);
+    StringWiper wipePlainData(plainData);
 
     unsigned char nonce[
         crypto_aead_xchacha20poly1305_ietf_NPUBBYTES];
@@ -348,10 +244,7 @@ bool saveVault(
         nonce,
         vaultKey);
 
-    if (plainData.empty() == false)
-    {
-        sodium_memzero(&plainData[0], plainData.size());
-    }
+    clearString(plainData);
 
     if (encryptResult != 0)
     {
@@ -444,11 +337,24 @@ bool saveVault(
     return true;
 }
 
-bool unlockVault(
-    const std::string& masterPassword,
-    unsigned char vaultKey[],
-    std::vector<Entry>& entries)
+bool deriveVaultKey(std::string& masterPassword, const unsigned char salt[], VaultKey& key)
 {
+    int result = crypto_pwhash(
+        key, sizeof key, masterPassword.c_str(),
+        static_cast<unsigned long long>(masterPassword.size()), salt,
+        crypto_pwhash_OPSLIMIT_INTERACTIVE, crypto_pwhash_MEMLIMIT_INTERACTIVE,
+        crypto_pwhash_ALG_ARGON2ID13);
+    clearString(masterPassword);
+    return result == 0;
+}
+
+bool unlockVault(
+    std::string& masterPassword,
+    VaultKey& vaultKey,
+    std::deque<Entry>& entries)
+{
+    VaultKeyWiper wipeOnFailure(vaultKey);
+
     if (!isVaultFileSizeAllowed("vault.json"))
     {
         std::cout << "The vault file is missing, too large, or unavailable.\n";
@@ -520,28 +426,18 @@ bool unlockVault(
         return false;
     }
 
-    if (crypto_pwhash(
-        vaultKey,
-        crypto_aead_xchacha20poly1305_ietf_KEYBYTES,
-        masterPassword.c_str(),
-        static_cast<unsigned long long>(masterPassword.size()),
-        salt.data(),
-        crypto_pwhash_OPSLIMIT_INTERACTIVE,
-        crypto_pwhash_MEMLIMIT_INTERACTIVE,
-        crypto_pwhash_ALG_ARGON2ID13) != 0)
+    if (!deriveVaultKey(masterPassword, salt.data(), vaultKey))
     {
-        sodium_memzero(
-            vaultKey,
-            crypto_aead_xchacha20poly1305_ietf_KEYBYTES);
         std::cout << "Could not create the encryption key.\n";
         return false;
     }
 
-    std::vector<unsigned char> decryptedData(encryptedData.size());
+    std::string plainData(encryptedData.size(), '\0');
+    StringWiper wipePlainData(plainData);
     unsigned long long decryptedLength = 0;
 
     int decryptResult = crypto_aead_xchacha20poly1305_ietf_decrypt(
-        decryptedData.data(),
+        reinterpret_cast<unsigned char*>(plainData.data()),
         &decryptedLength,
         nullptr,
         encryptedData.data(),
@@ -553,34 +449,18 @@ bool unlockVault(
 
     if (decryptResult != 0)
     {
-        sodium_memzero(decryptedData.data(), decryptedData.size());
-        sodium_memzero(
-            vaultKey,
-            crypto_aead_xchacha20poly1305_ietf_KEYBYTES);
-
         std::cout << "Incorrect password, or the vault file is damaged.\n";
         return false;
     }
 
-    std::string plainData(
-        reinterpret_cast<const char*>(decryptedData.data()),
-        static_cast<std::size_t>(decryptedLength));
-
-    sodium_memzero(decryptedData.data(), decryptedData.size());
-
+    plainData.resize(static_cast<std::size_t>(decryptedLength));
     if (parseEntries(plainData, entries) == false)
     {
-        clearString(plainData);
-        sodium_memzero(
-            vaultKey,
-            crypto_aead_xchacha20poly1305_ietf_KEYBYTES);
-
         std::cout << "The decrypted vault data is invalid.\n";
         return false;
     }
 
-    clearString(plainData);
-
+    wipeOnFailure.keepForSession();
     return true;
 }
 
@@ -615,45 +495,44 @@ bool readEntryField(
     return true;
 }
 
-void addEntry(
-    std::vector<Entry>& entries,
-    const unsigned char vaultKey[])
+bool readNewEntry(Entry& entry)
 {
-    Entry entry;
-
     if (!readEntryField("Service name: ", entry.service, 100, true) ||
         !readEntryField("Website: ", entry.website, 2048, false) ||
         !readEntryField("Username: ", entry.username, 256, false))
     {
-        clearEntry(entry);
         logEvent("entry_add", "input_rejected");
-        return;
+        return false;
     }
 
-    entry.password = readPassword("Password: ");
+    readPassword("Password: ", entry.password);
 
     if (!std::cin || !isValidPassword(entry.password))
     {
-        clearEntry(entry);
         std::cout << "The entry password must contain 1-256 printable ASCII characters, not only spaces.\n";
         logEvent("entry_add", "validation_failed");
-        return;
+        return false;
     }
 
     if (!readEntryField("Notes: ", entry.notes, 2048, false))
     {
-        clearEntry(entry);
         logEvent("entry_add", "input_rejected");
+        return false;
+    }
+
+    return true;
+}
+
+void addEntry(std::deque<Entry>& entries, const unsigned char vaultKey[])
+{
+    if (!readNewEntry(entries.emplace_back()))
+    {
+        entries.pop_back();
         return;
     }
 
-    entries.push_back(entry);
-
-    clearEntry(entry);
-
     if (!saveVault(entries, vaultKey))
     {
-        clearEntry(entries.back());
         entries.pop_back();
         std::cout << "Could not save the entry. It was not added.\n";
         logEvent("entry_add", "save_failed");
@@ -663,7 +542,7 @@ void addEntry(
     logEvent("entry_add", "success");
 }
 
-void viewEntries(const std::vector<Entry>& entries)
+void viewEntries(const std::deque<Entry>& entries)
 {
     if (entries.empty())
     {
@@ -682,11 +561,6 @@ void viewEntries(const std::vector<Entry>& entries)
     }
 }
 
-void clearEntries(std::vector<Entry>& entries)
-{
-    wipeEntries(entries);
-}
-
 int main()
 {
     if (sodium_init() < 0)
@@ -699,8 +573,8 @@ int main()
     bool userWantsToExit = false;
     bool vaultUnlocked = false;
 
-    unsigned char sessionVaultKey[
-        crypto_aead_xchacha20poly1305_ietf_KEYBYTES] = {};
+    VaultKey sessionVaultKey{};
+    VaultKeyWiper wipeOnExit(sessionVaultKey);
 
         if (!std::filesystem::exists("vault.json") &&
             std::filesystem::exists("vault.json.bak"))
@@ -719,7 +593,7 @@ int main()
         }
 
         bool vaultFileExists = std::filesystem::exists("vault.json");
-        std::vector<Entry> entries;
+        std::deque<Entry> entries;
         std::string menuChoice;
 
         while (userWantsToExit == false && std::cin)
@@ -738,52 +612,44 @@ int main()
 
                 if (menuChoice == "1")
                 {
-                    std::string masterPassword = readPassword("Choose a master password: ");
+                    std::string masterPassword;
+                    StringWiper wipeMaster(masterPassword);
+                    readPassword("Choose a master password: ", masterPassword);
                     if (!std::cin)
                     {
-                        clearString(masterPassword);
                         break;
                     }
 
                     if (!isValidNewMasterPassword(masterPassword))
                     {
-                        clearString(masterPassword);
                         std::cout << "Use 15-256 printable ASCII characters, not only spaces. A long, unique passphrase is recommended.\n";
                         logEvent("vault_create", "validation_failed");
                         continue;
                     }
 
-                    std::string confirmPassword = readPassword("Type it again: ");
+                    std::string confirmPassword;
+                    StringWiper wipeConfirmation(confirmPassword);
+                    readPassword("Type it again: ", confirmPassword);
                     if (!std::cin)
                     {
-                        clearString(masterPassword);
-                        clearString(confirmPassword);
                         break;
                     }
 
-                    if (masterPassword != confirmPassword)
+                    bool passwordsMatch = masterPassword == confirmPassword;
+                    clearString(confirmPassword);
+                    if (!passwordsMatch)
                     {
                         std::cout << "The passwords do not match. No vault was created.\n";
                     }
                     else
                     {
                         unsigned char salt[crypto_pwhash_SALTBYTES];
-                        unsigned char vaultKey[crypto_aead_xchacha20poly1305_ietf_KEYBYTES];
+                        VaultKey vaultKey{};
+                        VaultKeyWiper wipeAfterCreate(vaultKey);
 
                         randombytes_buf(salt, sizeof salt);
 
-                        int keyResult = crypto_pwhash(
-                            vaultKey,
-                            sizeof vaultKey,
-                            masterPassword.c_str(),
-                            static_cast<unsigned long long>(masterPassword.size()),
-                            salt,
-                            crypto_pwhash_OPSLIMIT_INTERACTIVE,
-                            crypto_pwhash_MEMLIMIT_INTERACTIVE,
-                            crypto_pwhash_ALG_ARGON2ID13
-                        );
-
-                        if (keyResult == 0)
+                        if (deriveVaultKey(masterPassword, salt, vaultKey))
                         {
                             const std::string emptyVaultData = "[]";
 
@@ -864,17 +730,6 @@ int main()
                         {
                             std::cout << "Could not create the encryption key.\n";
                         }
-
-                        sodium_memzero(vaultKey, sizeof vaultKey);
-                    }
-                    if (!masterPassword.empty())
-                    {
-                        clearString(masterPassword);
-                    }
-
-                    if (!confirmPassword.empty())
-                    {
-                        clearString(confirmPassword);
                     }
                 }
                 else if (menuChoice == "2")
@@ -910,7 +765,7 @@ int main()
                 }
                 else if (menuChoice == "3")
                 {
-                    clearEntries(entries);
+                    entries.clear();
 
                     sodium_memzero(
                         sessionVaultKey,
@@ -943,18 +798,17 @@ int main()
 
                 if (menuChoice == "1")
                 {
-                    std::string enteredMasterPassword =
-                        readPassword("Enter your master password: ");
+                    std::string enteredMasterPassword;
+                    StringWiper wipeMaster(enteredMasterPassword);
+                    readPassword("Enter your master password: ", enteredMasterPassword);
 
                     if (!std::cin)
                     {
-                        clearString(enteredMasterPassword);
                         break;
                     }
 
                     if (!isValidPassword(enteredMasterPassword))
                     {
-                        clearString(enteredMasterPassword);
                         std::cout << "Enter a non-blank master password of at most 256 printable ASCII characters.\n";
                         logEvent("vault_unlock", "validation_failed");
                         continue;
@@ -970,11 +824,6 @@ int main()
                     {
                         logEvent("vault_unlock", "failure");
                     }
-
-                    if (enteredMasterPassword.empty() == false)
-                    {
-                        clearString(enteredMasterPassword);
-                    }
                 }
                 else if (menuChoice == "2")
                 {
@@ -988,7 +837,6 @@ int main()
         }
 
         std::cout << "Program ended.\n";
-        clearEntries(entries);
-        sodium_memzero(sessionVaultKey, sizeof sessionVaultKey);
+        entries.clear();
         return 0;
 }

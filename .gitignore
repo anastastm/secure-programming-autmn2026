@@ -97,3 +97,11 @@ x86/
 *.vault
 *.key
 /vault.json
+
+# Local unlock state, audit trail, and environment files
+vault.json
+vault.lock
+vault.attempts
+vault.audit.log
+.env
+.env.*

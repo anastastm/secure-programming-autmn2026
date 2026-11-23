@@ -17,22 +17,16 @@
 #include "input_validation.h"
 #include "secret_cleanup.h"
 #include "vault_records.h"
+#include "audit_log.h"
+#include "console_control.h"
+#include "unlock_limit.h"
+#include "vault_file.h"
 
-constexpr unsigned long long MAX_VAULT_FILE_SIZE =
-16ULL * 1024ULL * 1024ULL;
-
-bool isVaultFileSizeAllowed(const std::filesystem::path& path)
+struct VaultSnapshot
 {
-    std::error_code error;
-    const auto size = std::filesystem::file_size(path, error);
-    return !error && size <= MAX_VAULT_FILE_SIZE;
-}
-
-void logEvent(const char* event, const char* result)
-{
-    std::clog << "{\"event\":\"" << event
-        << "\",\"result\":\"" << result << "\"}\n";
-}
+    std::string bytes;
+    std::string salt;
+};
 
 void readPassword(const char* prompt, std::string& password)
 {
@@ -40,7 +34,6 @@ void readPassword(const char* prompt, std::string& password)
     bool tooLong = false;
     bool invalidCharacter = false;
     password.reserve(MAX_PASSWORD_LENGTH);
-    std::cout << prompt << std::flush;
 
 #ifndef _WIN32
     termios originalSettings{};
@@ -62,14 +55,15 @@ void readPassword(const char* prompt, std::string& password)
     }
 #endif
 
-    while (true)
+    std::cout << prompt << std::flush;
+    while (!interrupted())
     {
 #ifdef _WIN32
         int key = _getch();
 #else
         int key = std::cin.get();
 #endif
-        if (key == EOF
+        if (interrupted() || key == EOF
 #ifdef _WIN32
             || key == 26
 #else
@@ -82,6 +76,13 @@ void readPassword(const char* prompt, std::string& password)
             break;
         }
 
+#ifdef _WIN32
+        if (key == 3)
+        {
+            InterlockedExchange(&stopRequested, 1);
+            break;
+        }
+#endif
         if (key == '\r' || key == '\n')
         {
             break;
@@ -125,6 +126,13 @@ void readPassword(const char* prompt, std::string& password)
 #endif
     std::cout << '\n';
 
+    if (interrupted())
+    {
+        clearString(password);
+        std::cin.setstate(std::ios::eofbit);
+        return;
+    }
+
     if (tooLong)
     {
         clearString(password);
@@ -139,87 +147,11 @@ void readPassword(const char* prompt, std::string& password)
     }
 }
 
-bool readJsonStringField(
-    const std::string& json,
-    const std::string& field,
-    std::string& value)
-{
-    std::string marker = "\"" + field + "\": \"";
-    std::size_t valueStart = json.find(marker);
-
-    if (valueStart == std::string::npos)
-    {
-        return false;
-    }
-
-    valueStart += marker.size();
-
-    std::size_t valueEnd = json.find('"', valueStart);
-
-    if (valueEnd == std::string::npos)
-    {
-        return false;
-    }
-
-    value = json.substr(valueStart, valueEnd - valueStart);
-    return true;
-}
-
 bool saveVault(
     const std::deque<Entry>& entries,
-    const unsigned char vaultKey[])
+    const unsigned char vaultKey[],
+    VaultSnapshot& snapshot)
 {
-    if (!isVaultFileSizeAllowed("vault.json"))
-    {
-        std::cout << "The vault file is missing, too large, or unavailable.\n";
-        return false;
-    }
-
-    std::ifstream existingFile("vault.json", std::ios::binary);
-
-    if (!existingFile)
-    {
-        std::cout << "Could not open the existing vault file.\n";
-        return false;
-    }
-
-    std::string vaultContents;
-    std::string line;
-
-    while (std::getline(existingFile, line))
-    {
-        vaultContents += line;
-    }
-
-    existingFile.close();
-
-    std::string saltHex;
-
-    if (vaultContents.find("\"version\": 1") == std::string::npos ||
-        readJsonStringField(vaultContents, "salt", saltHex) == false ||
-        saltHex.size() != crypto_pwhash_SALTBYTES * 2)
-    {
-        std::cout << "The vault file is not in the expected format.\n";
-        return false;
-    }
-
-    std::vector<unsigned char> salt(crypto_pwhash_SALTBYTES);
-    std::size_t saltLength = 0;
-
-    if (sodium_hex2bin(
-        salt.data(),
-        salt.size(),
-        saltHex.c_str(),
-        saltHex.size(),
-        nullptr,
-        &saltLength,
-        nullptr) != 0 ||
-        saltLength != salt.size())
-    {
-        std::cout << "The vault file contains an invalid salt.\n";
-        return false;
-    }
-
     std::string plainData = serializeEntries(entries);
     StringWiper wipePlainData(plainData);
 
@@ -272,68 +204,16 @@ bool saveVault(
         return false;
     }
 
-    const std::filesystem::path vaultPath = "vault.json";
-    const std::filesystem::path tempPath = "vault.json.tmp";
-    const std::filesystem::path backupPath = "vault.json.bak";
-
-    std::ofstream vaultFile(
-        tempPath,
-        std::ios::binary | std::ios::trunc);
-
-    if (!vaultFile)
+    std::string updated = formatVaultFile(snapshot.salt, nonceHex, encryptedHex.data());
+    std::string current;
+    if (!readLocalFile("vault.json", MAX_VAULT_FILE_SIZE, current) || current != snapshot.bytes)
     {
-        std::cout << "Could not save the vault file.\n";
+        std::cout << "The vault changed since unlock. Lock and reopen it before saving.\n";
+        logEvent("vault_save", "file_changed");
         return false;
     }
-
-    vaultFile << "{\n"
-        << "  \"version\": 1,\n"
-        << "  \"salt\": \"" << saltHex << "\",\n"
-        << "  \"nonce\": \"" << nonceHex << "\",\n"
-        << "  \"encrypted_data\": \"" << encryptedHex.data() << "\"\n"
-        << "}\n";
-
-    vaultFile.close();
-
-    if (vaultFile.fail())
-    {
-        std::error_code cleanupError;
-        std::filesystem::remove(tempPath, cleanupError);
-        std::cout << "Could not save the vault file.\n";
-        return false;
-    }
-
-    std::error_code fileError;
-    std::filesystem::remove(backupPath, fileError);
-
-    if (fileError)
-    {
-        std::filesystem::remove(tempPath, fileError);
-        std::cout << "Could not prepare the vault file for saving.\n";
-        return false;
-    }
-
-    std::filesystem::rename(vaultPath, backupPath, fileError);
-
-    if (fileError)
-    {
-        std::filesystem::remove(tempPath, fileError);
-        std::cout << "Could not prepare the vault file for saving.\n";
-        return false;
-    }
-
-    std::filesystem::rename(tempPath, vaultPath, fileError);
-
-    if (fileError)
-    {
-        std::error_code restoreError;
-        std::filesystem::rename(backupPath, vaultPath, restoreError);
-        std::filesystem::remove(tempPath, fileError);
-        std::cout << "Could not save the vault file.\n";
-        return false;
-    }
-
-    std::filesystem::remove(backupPath, fileError);
+    if (interrupted() || !replaceLocalFile("vault.json", updated)) return false;
+    snapshot.bytes.swap(updated);
     return true;
 }
 
@@ -351,72 +231,37 @@ bool deriveVaultKey(std::string& masterPassword, const unsigned char salt[], Vau
 bool unlockVault(
     std::string& masterPassword,
     VaultKey& vaultKey,
-    std::deque<Entry>& entries)
+    std::deque<Entry>& entries,
+    VaultSnapshot& snapshot)
 {
     VaultKeyWiper wipeOnFailure(vaultKey);
 
-    if (!isVaultFileSizeAllowed("vault.json"))
+    std::string bytes;
+    VaultFile header;
+    if (!readLocalFile("vault.json", MAX_VAULT_FILE_SIZE, bytes) || !parseVaultFile(bytes, header))
     {
-        std::cout << "The vault file is missing, too large, or unavailable.\n";
-        return false;
-    }
-
-    std::ifstream vaultFile("vault.json", std::ios::binary);
-
-    if (!vaultFile)
-    {
-        std::cout << "Could not open the vault file.\n";
-        return false;
-    }
-
-    std::string vaultContents;
-    std::string line;
-
-    while (std::getline(vaultFile, line))
-    {
-        vaultContents += line;
-    }
-
-    std::string saltHex;
-    std::string nonceHex;
-    std::string encryptedHex;
-
-    if (vaultContents.find("\"version\": 1") == std::string::npos ||
-        readJsonStringField(vaultContents, "salt", saltHex) == false ||
-        readJsonStringField(vaultContents, "nonce", nonceHex) == false ||
-        readJsonStringField(vaultContents, "encrypted_data", encryptedHex) == false)
-    {
-        std::cout << "The vault file is not in the expected format.\n";
-        return false;
-    }
-
-    if (saltHex.size() != crypto_pwhash_SALTBYTES * 2 ||
-        nonceHex.size() != crypto_aead_xchacha20poly1305_ietf_NPUBBYTES * 2 ||
-        encryptedHex.size() % 2 != 0 ||
-        encryptedHex.size() < crypto_aead_xchacha20poly1305_ietf_ABYTES * 2)
-    {
-        std::cout << "The vault file contains invalid data.\n";
+        std::cout << "Could not read a valid vault file.\n";
         return false;
     }
 
     std::vector<unsigned char> salt(crypto_pwhash_SALTBYTES);
     std::vector<unsigned char> nonce(
         crypto_aead_xchacha20poly1305_ietf_NPUBBYTES);
-    std::vector<unsigned char> encryptedData(encryptedHex.size() / 2);
+    std::vector<unsigned char> encryptedData(header.encrypted.size() / 2);
 
     std::size_t saltLength = 0;
     std::size_t nonceLength = 0;
     std::size_t encryptedLength = 0;
 
     if (sodium_hex2bin(
-        salt.data(), salt.size(), saltHex.c_str(), saltHex.size(),
+        salt.data(), salt.size(), header.salt.c_str(), header.salt.size(),
         nullptr, &saltLength, nullptr) != 0 ||
         sodium_hex2bin(
-            nonce.data(), nonce.size(), nonceHex.c_str(), nonceHex.size(),
+            nonce.data(), nonce.size(), header.nonce.c_str(), header.nonce.size(),
             nullptr, &nonceLength, nullptr) != 0 ||
         sodium_hex2bin(
             encryptedData.data(), encryptedData.size(),
-            encryptedHex.c_str(), encryptedHex.size(),
+            header.encrypted.c_str(), header.encrypted.size(),
             nullptr, &encryptedLength, nullptr) != 0 ||
         saltLength != salt.size() ||
         nonceLength != nonce.size() ||
@@ -460,6 +305,8 @@ bool unlockVault(
         return false;
     }
 
+    snapshot.bytes.swap(bytes);
+    snapshot.salt.swap(header.salt);
     wipeOnFailure.keepForSession();
     return true;
 }
@@ -473,7 +320,7 @@ bool readEntryField(
     std::cout << prompt << std::flush;
     InputResult result = readBoundedLine(std::cin, value, maxLength);
 
-    if (result == InputResult::endOfInput)
+    if (interrupted() || result == InputResult::endOfInput)
     {
         return false;
     }
@@ -523,7 +370,7 @@ bool readNewEntry(Entry& entry)
     return true;
 }
 
-void addEntry(std::deque<Entry>& entries, const unsigned char vaultKey[])
+void addEntry(std::deque<Entry>& entries, const unsigned char vaultKey[], VaultSnapshot& snapshot)
 {
     if (!readNewEntry(entries.emplace_back()))
     {
@@ -531,7 +378,7 @@ void addEntry(std::deque<Entry>& entries, const unsigned char vaultKey[])
         return;
     }
 
-    if (!saveVault(entries, vaultKey))
+    if (!saveVault(entries, vaultKey, snapshot))
     {
         entries.pop_back();
         std::cout << "Could not save the entry. It was not added.\n";
@@ -561,7 +408,7 @@ void viewEntries(const std::deque<Entry>& entries)
     }
 }
 
-int main()
+int runManager()
 {
     if (sodium_init() < 0)
     {
@@ -569,12 +416,22 @@ int main()
         return 1;
     }
 
+    ConsoleControl console;
+    VaultDirectoryLock directoryLock;
+    if (!console.start() || !directoryLock.acquire())
+    {
+        std::cout << "Could not start a session. Check for another open instance or an unavailable vault directory.\n";
+        return 1;
+    }
+    logEvent("session_start", "success");
+    VaultSnapshot snapshot;
     std::cout << "Crypto library is ready.\n";
     bool userWantsToExit = false;
     bool vaultUnlocked = false;
 
-    VaultKey sessionVaultKey{};
-    VaultKeyWiper wipeOnExit(sessionVaultKey);
+    {
+        VaultKey sessionVaultKey{};
+        VaultKeyWiper wipeOnExit(sessionVaultKey);
 
         if (!std::filesystem::exists("vault.json") &&
             std::filesystem::exists("vault.json.bak"))
@@ -596,7 +453,7 @@ int main()
         std::deque<Entry> entries;
         std::string menuChoice;
 
-        while (userWantsToExit == false && std::cin)
+        while (!userWantsToExit && !interrupted() && std::cin)
         {
             if (vaultFileExists == false)
             {
@@ -605,7 +462,7 @@ int main()
                 std::cout << "2. Exit\n";
                 std::cout << "Choose an option: ";
 
-                if (readBoundedLine(std::cin, menuChoice, 1) == InputResult::endOfInput)
+                if (readBoundedLine(std::cin, menuChoice, 1) == InputResult::endOfInput || interrupted())
                 {
                     break;
                 }
@@ -639,6 +496,7 @@ int main()
                     clearString(confirmPassword);
                     if (!passwordsMatch)
                     {
+                        logEvent("vault_create", "confirmation_failed");
                         std::cout << "The passwords do not match. No vault was created.\n";
                     }
                     else
@@ -692,33 +550,17 @@ int main()
                                     encryptedData.size()
                                 );
 
-                                std::ofstream vaultFile("vault.json", std::ios::binary);
-
-                                if (!vaultFile)
+                                const std::string data = formatVaultFile(saltHex, nonceHex, encryptedHex.data());
+                                if (!interrupted() && writeNewFile("vault.json", data))
                                 {
-                                    std::cout << "Could not create the vault file.\n";
+                                    vaultFileExists = true;
+                                    std::cout << "Encrypted vault saved to vault.json.\n";
+                                    logEvent("vault_create", "success");
                                 }
                                 else
                                 {
-                                    vaultFile << "{\n"
-                                        << "  \"version\": 1,\n"
-                                        << "  \"salt\": \"" << saltHex << "\",\n"
-                                        << "  \"nonce\": \"" << nonceHex << "\",\n"
-                                        << "  \"encrypted_data\": \"" << encryptedHex.data() << "\"\n"
-                                        << "}\n";
-
-                                    vaultFile.close();
-
-                                    if (vaultFile.fail())
-                                    {
-                                        std::cout << "Could not save the vault file.\n";
-                                    }
-                                    else
-                                    {
-                                        vaultFileExists = true;
-                                        std::cout << "Encrypted vault saved to vault.json.\n";
-                                        logEvent("vault_create", "success");
-                                    }
+                                    std::cout << "Could not create the vault file.\n";
+                                    logEvent("vault_create", "write_failed");
                                 }
                             }
                             else
@@ -750,18 +592,19 @@ int main()
                 std::cout << "4. Exit\n";
                 std::cout << "Choose an option: ";
 
-                if (readBoundedLine(std::cin, menuChoice, 1) == InputResult::endOfInput)
+                if (readBoundedLine(std::cin, menuChoice, 1) == InputResult::endOfInput || interrupted())
                 {
                     break;
                 }
 
                 if (menuChoice == "1")
                 {
-                    addEntry(entries, sessionVaultKey);
+                    addEntry(entries, sessionVaultKey, snapshot);
                 }
                 else if (menuChoice == "2")
                 {
                     viewEntries(entries);
+                    logEvent("entry_view", "success");
                 }
                 else if (menuChoice == "3")
                 {
@@ -771,6 +614,7 @@ int main()
                         sessionVaultKey,
                         sizeof sessionVaultKey);
 
+                    snapshot = {};
                     vaultUnlocked = false;
                     std::cout << "Vault locked.\n";
                     logEvent("vault_lock", "success");
@@ -791,13 +635,28 @@ int main()
                 std::cout << "2. Exit\n";
                 std::cout << "Choose an option: ";
 
-                if (readBoundedLine(std::cin, menuChoice, 1) == InputResult::endOfInput)
+                if (readBoundedLine(std::cin, menuChoice, 1) == InputResult::endOfInput || interrupted())
                 {
                     break;
                 }
 
                 if (menuChoice == "1")
                 {
+                    UnlockLimit limit;
+                    const auto now = std::time(nullptr);
+                    if (now < 0 || !limit.load())
+                    {
+                        std::cout << "Could not check the unlock limit. The vault stays locked.\n";
+                        logEvent("vault_unlock", "state_error");
+                        continue;
+                    }
+                    if (limit.blocked(now))
+                    {
+                        std::cout << "Too many attempts. Try again in "
+                            << limit.blockedUntil - now << " seconds.\n";
+                        logEvent("vault_unlock", "rate_limited");
+                        continue;
+                    }
                     std::string enteredMasterPassword;
                     StringWiper wipeMaster(enteredMasterPassword);
                     readPassword("Enter your master password: ", enteredMasterPassword);
@@ -807,6 +666,13 @@ int main()
                         break;
                     }
 
+                    const auto submitted = std::time(nullptr);
+                    if (submitted < 0 || !limit.reserve(submitted))
+                    {
+                        std::cout << "Could not record the attempt. The vault stays locked.\n";
+                        logEvent("vault_unlock", "state_error");
+                        continue;
+                    }
                     if (!isValidPassword(enteredMasterPassword))
                     {
                         std::cout << "Enter a non-blank master password of at most 256 printable ASCII characters.\n";
@@ -814,8 +680,17 @@ int main()
                         continue;
                     }
 
-                    if (unlockVault(enteredMasterPassword, sessionVaultKey, entries))
+                    if (unlockVault(enteredMasterPassword, sessionVaultKey, entries, snapshot))
                     {
+                        if (interrupted() || !limit.reset())
+                        {
+                            entries.clear();
+                            sodium_memzero(sessionVaultKey, sizeof sessionVaultKey);
+                            snapshot = {};
+                            std::cout << "Could not complete the unlock. The vault stays locked.\n";
+                            logEvent("vault_unlock", "incomplete");
+                            continue;
+                        }
                         vaultUnlocked = true;
                         std::cout << "Vault unlocked successfully.\n";
                         logEvent("vault_unlock", "success");
@@ -835,8 +710,21 @@ int main()
                 }
             }
         }
+    }
+    logEvent("session_end", interrupted() ? "interrupted" : "success");
+    std::cout << "Program ended.\n";
+    return 0;
+}
 
-        std::cout << "Program ended.\n";
-        entries.clear();
-        return 0;
+int main()
+{
+    try
+    {
+        return runManager();
+    }
+    catch (const std::exception&)
+    {
+        std::cerr << "Could not continue the session.\n";
+        return 1;
+    }
 }

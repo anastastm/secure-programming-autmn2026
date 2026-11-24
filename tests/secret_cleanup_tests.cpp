@@ -5,6 +5,7 @@
 #include <iterator>
 #include <stdexcept>
 #include <type_traits>
+#include <utility>
 
 static_assert(!std::is_copy_constructible_v<VaultKeyWiper>);
 static_assert(!std::is_move_constructible_v<VaultKeyWiper>);
@@ -61,7 +62,19 @@ bool checkRecordLoading()
     second.service = "other";
     second.password.assign(MAX_PASSWORD_LENGTH, 'x');
 
-    const std::string data = serializeEntries(saved);
+    std::string data;
+    StringWiper wipeData(data);
+    serializeEntries(saved, data);
+
+    // This is the exact layout written by the original std::quoted serializer.
+    const std::string expected =
+        R"("example" "" "" " spaced \"quoted\" " "folder\\name")" "\n" +
+        std::string(R"("other" "" "" ")") + second.password + "\" \"\"\n";
+    if (data != expected)
+    {
+        std::cerr << "Saved bytes differ from the existing vault format.\n";
+        return false;
+    }
     std::deque<Entry> loaded;
     if (!parseEntries(data, loaded) || loaded.size() != 2 ||
         loaded.front().service != first.service || loaded.front().password != first.password ||
@@ -76,10 +89,83 @@ bool checkRecordLoading()
         std::cerr << "A partial record replaced the current entries.\n";
         return false;
     }
+    saved.clear();
+    serializeEntries(saved, data);
+    if (!data.empty() || !parseEntries(data, loaded) || !loaded.empty())
+    {
+        std::cerr << "Serializing an empty vault retained record data.\n";
+        return false;
+    }
     if (!parseEntries("[]", loaded) || !loaded.empty())
     {
         std::cerr << "Could not load an empty vault.\n";
         return false;
+    }
+    return true;
+}
+
+bool checkStoredFieldValidation()
+{
+    std::deque<Entry> loaded;
+    const std::string good = R"("original" "" "" "p" "")";
+    if (!parseEntries(good + "\r\n", loaded) || loaded.size() != 1)
+    {
+        std::cerr << "Could not read a CRLF record.\n";
+        return false;
+    }
+
+    const std::string invalidRows[] = {
+        R"("" "" "" "p" "")",                         // Missing service
+        R"("s" "" "" " " "")",                       // Blank password
+        R"("s" "" "" ")" + std::string(1, char(0x80)) + R"(" "")",
+        R"("s" "" "" "p" "bad\q")",                  // Unknown escape
+        R"("s" "" "" "p" "unfinished\)",              // Incomplete escape
+        R"(unquoted "" "" "p" "")",
+        R"("s" "" """p" "")",                        // Missing separator
+        R"("s" "" "" "p")",                          // Missing field
+        R"("s" "" "" "p" "" "extra")",
+        R"("s" "" "" "p" ")" + std::string(1, '\0') + R"(")"
+    };
+    for (const std::string& invalid : invalidRows)
+    {
+        if (parseEntries(good + "\n" + invalid, loaded) ||
+            loaded.size() != 1 || loaded.front().service != "original")
+        {
+            std::cerr << "Invalid row accepted or existing entries replaced.\n";
+            return false;
+        }
+    }
+
+    // Each limit counts decoded bytes, even when every character needs escaping.
+    std::deque<Entry> rows;
+    Entry& row = rows.emplace_back();
+    row.service = "s";
+    row.password = "p";
+    const std::pair<std::string*, std::size_t> fields[] = {
+        {&row.service, MAX_SERVICE_LENGTH}, {&row.website, MAX_WEBSITE_LENGTH},
+        {&row.username, MAX_USERNAME_LENGTH}, {&row.password, MAX_PASSWORD_LENGTH},
+        {&row.notes, MAX_NOTES_LENGTH}
+    };
+    std::string data;
+    StringWiper guard(data);
+    for (const auto& [field, limit] : fields)
+    {
+        field->assign(limit, '"');
+        serializeEntries(rows, data);
+        if (!parseEntries(data, loaded) || loaded.size() != 1 ||
+            recordFields(loaded.front()) != recordFields(row))
+        {
+            std::cerr << "Could not round-trip a field at its limit.\n";
+            return false;
+        }
+        field->push_back('"');
+        serializeEntries(rows, data);
+        if (parseEntries(data, loaded))
+        {
+            std::cerr << "Accepted an oversized stored field.\n";
+            return false;
+        }
+        field->assign(1, 'x');
     }
     return true;
 }
@@ -133,10 +219,10 @@ int main()
         std::cerr << "Password string retained its contents after cleanup.\n";
         return 1;
     }
-    if (!checkRecordLoading())
+    if (!checkRecordLoading() || !checkStoredFieldValidation())
     {
         return 1;
     }
-    std::cout << "4 key cleanup, 2 password string, and 3 record checks passed\n";
+    std::cout << "Key cleanup, password cleanup, and record validation checks passed\n";
     return 0;
 }

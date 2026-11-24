@@ -152,8 +152,9 @@ bool saveVault(
     const unsigned char vaultKey[],
     VaultSnapshot& snapshot)
 {
-    std::string plainData = serializeEntries(entries);
+    std::string plainData;
     StringWiper wipePlainData(plainData);
+    serializeEntries(entries, plainData);
 
     unsigned char nonce[
         crypto_aead_xchacha20poly1305_ietf_NPUBBYTES];
@@ -344,9 +345,9 @@ bool readEntryField(
 
 bool readNewEntry(Entry& entry)
 {
-    if (!readEntryField("Service name: ", entry.service, 100, true) ||
-        !readEntryField("Website: ", entry.website, 2048, false) ||
-        !readEntryField("Username: ", entry.username, 256, false))
+    if (!readEntryField("Service name: ", entry.service, MAX_SERVICE_LENGTH, true) ||
+        !readEntryField("Website: ", entry.website, MAX_WEBSITE_LENGTH, false) ||
+        !readEntryField("Username: ", entry.username, MAX_USERNAME_LENGTH, false))
     {
         logEvent("entry_add", "input_rejected");
         return false;
@@ -361,7 +362,7 @@ bool readNewEntry(Entry& entry)
         return false;
     }
 
-    if (!readEntryField("Notes: ", entry.notes, 2048, false))
+    if (!readEntryField("Notes: ", entry.notes, MAX_NOTES_LENGTH, false))
     {
         logEvent("entry_add", "input_rejected");
         return false;

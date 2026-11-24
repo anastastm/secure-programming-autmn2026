@@ -19,6 +19,8 @@ void testVaultFormat()
     VaultFile header;
     check(parseVaultFile(good, header) && header.salt == salt && header.encrypted == cipher,
         "version 1 round trip");
+    check(parseVaultFile(formatVaultFile(salt, nonce.c_str(), cipher.c_str(), 2), header) &&
+        header.version == 2, "account-bound version 2 envelope");
     const std::string reordered = "{\"nonce\":\"" + nonce + "\",\"encrypted_data\":\"" + cipher +
         "\",\"version\":1,\"salt\":\"" + salt + "\"}";
     check(parseVaultFile(reordered, header), "normal JSON whitespace and reordered fields");

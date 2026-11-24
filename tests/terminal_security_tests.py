@@ -124,6 +124,10 @@ def check_security(directory):
 
     app = start(directory)
     unlock(app, MASTER, "Vault unlocked successfully.")
+    choose(app, 2)
+    app.expect_exact("Service: demo-service")
+    app.expect_exact("Username: demo-user")
+    app.expect_exact("Password: [hidden]")
     app.expect_exact("Choose an option: ")
     app.sendcontrol("c")
     app.expect_exact("Program ended.")

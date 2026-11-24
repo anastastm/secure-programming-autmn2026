@@ -8,7 +8,7 @@ A small cross-platform command-line password manager written in C++. It stores a
 - Mask the master password and entry passwords as they are typed.
 - Unlock and lock the vault with the master password.
 - Add entries with a service, website, username, password, and notes.
-- View saved entries while keeping their passwords hidden.
+- View a masked list, or use option 5 and confirm with `yes` to show one selected password on the terminal.
 - Save entries in `vault.json` in encrypted form and load them after unlocking.
 - Reject an incorrect master password or damaged encrypted data.
 - Require 15-256 printable ASCII characters for a new master password; spaces are allowed, but a password cannot contain only spaces.
@@ -77,7 +77,17 @@ The stronger minimum applies when creating a vault. Existing vaults with shorter
 
 Passwords are preserved exactly, including spaces. Unsupported characters reject the whole password attempt instead of silently changing it. Password input supports printable ASCII only. Other fields retain non-ASCII bytes; complete Unicode validation is not implemented. Field limits count bytes, not Unicode characters. ASCII controls (including tabs, newlines, NUL, and DEL) are rejected in fields. Quotes and backslashes are allowed and escaped by the existing record serialization. Website values are stored as text, never opened or executed, so they are not restricted to a URL scheme.
 
+On unlock, each saved record must contain five quoted fields. Only escaped quotes and backslashes are accepted. Each field is checked against its byte limit, and a malformed record rejects the entire load.
+
 An invalid field cancels adding that entry. Oversized text lines are drained before the next prompt, and their truncated prefixes are discarded. On EOF or an input-stream failure, the current operation is cancelled and the normal exit path clears session entries and the key. During hidden password input, Ctrl+D on Linux and Ctrl+Z on Windows request this exit. Ctrl+C requests a normal session exit and cleanup. Forced process termination may bypass application cleanup.
+
+## Vault ownership
+
+Each vault belongs to one local OS account. Unlock requires the master password and the same account identifier used at creation (Linux UID or Windows SID). Add, view, reveal, and save check the account again inside the operation. Run the program in a private directory for each vault.
+
+Version 1 vaults predate account binding. Open the original file under its filesystem owner and enter its existing master password. Viewing leaves the file at version 1. The next successful save writes version 2. Keep a private backup before upgrading if you need to use the older program. A version 2 vault depends on its original account identifier, so moving it to a different account or operating system requires a separate transfer feature. Local UIDs can repeat on different computers.
+
+If you choose option 5, the selected password is printed on the terminal and can remain in its scrollback. The ordinary list masks all passwords.
 
 ## Unlock limit, integrity, and audit history
 
@@ -121,4 +131,4 @@ python3 tests/terminal_security_tests.py ./build/password_manager
 
 ## Current limits
 
-This checkpoint supports adding and viewing entries. It does not yet support editing, deleting, searching, revealing a saved password, generating passwords, or automatically locking after inactivity. It is a course project and is not intended to replace a professionally reviewed password manager.
+This checkpoint supports adding, listing, and explicitly revealing entries. It does not yet support editing, deleting, searching, generating passwords, or automatically locking after inactivity. It is a course project and is not intended to replace a professionally reviewed password manager.

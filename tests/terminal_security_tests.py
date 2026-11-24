@@ -149,7 +149,52 @@ def check_security(directory):
     assert ("session_end", "interrupted") in [(e["event"], e["result"]) for e in events]
 
 
+def check_owner_and_reveal(directory):
+    # Fixed, disposable fixtures encrypted with MASTER. The second uses a Windows
+    # SID, guaranteeing a different identity from the Linux account running this test.
+    legacy = {'version': 1, 'salt': '3afcaa338702af02955e956a2da526c9', 'nonce': '0d52237bf33834761811c9160ddd587de6fde9356c869da5', 'encrypted_data': 'c113a8204fa99f3c4b1213741bf2fe4a94433d5993c9eb1220d65928376dd57ff7bf37ee486ad1131ab955240841270557cf0bfd048139'}
+    foreign = {'version': 2, 'salt': '7e1623fe04b166d2031f16c6442cc186', 'nonce': '42a4c6909ce0968e1fdacbc4a7f26fe604f0aca32eda393c', 'encrypted_data': 'd2305d7daaf95706f489cf276698908f3a5fcf4932c0b4f27371ac34f6e85fbfaa391ef7f776181702eedc0ed35cb665fcd3790ff2fbd9'}
+    vault = Path(directory, "vault.json")
+    vault.write_text(json.dumps(foreign))
+    app = start(directory)
+    unlock(app, MASTER, "Incorrect password, or the vault file is damaged.")
+    finish(app, 2)
+    foreign["version"] = 1
+    vault.write_text(json.dumps(foreign))
+    app = start(directory)
+    unlock(app, MASTER, "Incorrect password, or the vault file is damaged.")
+    finish(app, 2)
+
+    vault.write_text(json.dumps(legacy))
+    app = start(directory)
+    unlock(app, MASTER, "Vault unlocked successfully.")
+    assert json.loads(vault.read_text())["version"] == 1
+    fill_entry(app)
+    app.expect_exact("Entry added and saved")
+    assert json.loads(vault.read_text())["version"] == 2
+    finish(app, 4)
+    app = start(directory)
+    unlock(app, MASTER, "Vault unlocked successfully.")
+    choose(app, 5)
+    answer(app, "Entry number to reveal (1-2): ", "0")
+    app.expect_exact("Invalid entry number.")
+    choose(app, 5)
+    answer(app, "Entry number to reveal (1-2): ", "1")
+    answer(app, "Type yes: ", "no")
+    app.expect_exact("Reveal cancelled.")
+    choose(app, 5)
+    answer(app, "Entry number to reveal (1-2): ", "1")
+    answer(app, "Type yes: ", "yes")
+    app.expect_exact("Password: old-secret")
+    finish(app, 4)
+    log = Path(directory, "vault.audit.log").read_text()
+    assert '"event":"password_reveal","result":"success"' in log
+    assert "old-secret" not in log and ENTRY_PASSWORD not in log
+
+
 if __name__ == "__main__":
     with TemporaryDirectory() as directory:
         check_security(directory)
-    print("CLI security checks passed")
+    with TemporaryDirectory() as directory:
+        check_owner_and_reveal(directory)
+    print("CLI security and ownership checks passed")

@@ -7,6 +7,7 @@ constexpr std::size_t MAX_VAULT_FILE_SIZE = 16U * 1024U * 1024U;
 
 struct VaultFile
 {
+    int version = 0;
     std::string salt;
     std::string nonce;
     std::string encrypted;
@@ -28,7 +29,7 @@ inline bool takeVaultChar(std::istream& in, char expected)
     return in.get() == expected;
 }
 
-// Version 1 uses plain ASCII field names and hexadecimal string values.
+// Both supported versions use plain ASCII field names and hexadecimal string values.
 inline bool readVaultString(std::istream& in, std::string& value)
 {
     if (!takeVaultChar(in, '"')) return false;
@@ -45,7 +46,6 @@ inline bool parseVaultFile(const std::string& data, VaultFile& header)
 {
     std::istringstream in(data);
     VaultFile parsed;
-    bool version = false;
     if (!takeVaultChar(in, '{')) return false;
     for (int field = 0; field < 4; ++field)
     {
@@ -54,8 +54,11 @@ inline bool parseVaultFile(const std::string& data, VaultFile& header)
         if (!readVaultString(in, name) || !takeVaultChar(in, ':')) return false;
         if (name == "version")
         {
-            if (version || !takeVaultChar(in, '1')) return false;
-            version = true;
+            if (parsed.version != 0) return false;
+            skipVaultWhitespace(in);
+            int digit = in.get();
+            if (digit != '1' && digit != '2') return false;
+            parsed.version = digit - '0';
         }
         else
         {
@@ -69,7 +72,7 @@ inline bool parseVaultFile(const std::string& data, VaultFile& header)
     }
     if (!takeVaultChar(in, '}')) return false;
     skipVaultWhitespace(in);
-    if (!in.eof() || !version || parsed.salt.size() != crypto_pwhash_SALTBYTES * 2 ||
+    if (!in.eof() || parsed.version == 0 || parsed.salt.size() != crypto_pwhash_SALTBYTES * 2 ||
         parsed.nonce.size() != crypto_aead_xchacha20poly1305_ietf_NPUBBYTES * 2 ||
         parsed.encrypted.size() < crypto_aead_xchacha20poly1305_ietf_ABYTES * 2 ||
         parsed.encrypted.size() % 2 != 0) return false;
@@ -77,8 +80,8 @@ inline bool parseVaultFile(const std::string& data, VaultFile& header)
     return true;
 }
 
-inline std::string formatVaultFile(const std::string& salt, const char* nonce, const char* encrypted)
+inline std::string formatVaultFile(const std::string& salt, const char* nonce, const char* encrypted, int version = 1)
 {
-    return "{\n  \"version\": 1,\n  \"salt\": \"" + salt +
+    return "{\n  \"version\": " + std::to_string(version) + ",\n  \"salt\": \"" + salt +
         "\",\n  \"nonce\": \"" + nonce + "\",\n  \"encrypted_data\": \"" + encrypted + "\"\n}\n";
 }

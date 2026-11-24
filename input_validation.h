@@ -7,6 +7,10 @@
 
 constexpr std::size_t MIN_MASTER_PASSWORD_LENGTH = 15;
 constexpr std::size_t MAX_PASSWORD_LENGTH = 256;
+constexpr std::size_t MAX_SERVICE_LENGTH = 100;
+constexpr std::size_t MAX_WEBSITE_LENGTH = 2048;
+constexpr std::size_t MAX_USERNAME_LENGTH = 256;
+constexpr std::size_t MAX_NOTES_LENGTH = 2048;
 
 inline void clearString(std::string& value)
 {
@@ -82,6 +86,8 @@ inline InputResult readBoundedLine(
     std::size_t maxLength)
 {
     clearString(value);
+    // Reserve while empty so growing a partially typed field cannot discard plaintext.
+    value.reserve(maxLength);
     bool tooLong = false;
     int character;
 

@@ -1,4 +1,5 @@
 #include <iostream>
+#include <charconv>
 #include <string>
 #include <vector>
 #include <deque>
@@ -21,9 +22,11 @@
 #include "console_control.h"
 #include "unlock_limit.h"
 #include "vault_file.h"
+#include "vault_access.h"
 
 struct VaultSnapshot
 {
+    std::string owner;
     std::string bytes;
     std::string salt;
 };
@@ -152,6 +155,8 @@ bool saveVault(
     const unsigned char vaultKey[],
     VaultSnapshot& snapshot)
 {
+    if (!authorizeRecords(snapshot.owner, "vault_save")) return false;
+    const auto binding = ownerBinding(snapshot.owner);
     std::string plainData;
     StringWiper wipePlainData(plainData);
     serializeEntries(entries, plainData);
@@ -171,8 +176,8 @@ bool saveVault(
         &encryptedLength,
         reinterpret_cast<const unsigned char*>(plainData.data()),
         static_cast<unsigned long long>(plainData.size()),
-        nullptr,
-        0,
+        reinterpret_cast<const unsigned char*>(binding.data()),
+        binding.size(),
         nullptr,
         nonce,
         vaultKey);
@@ -205,7 +210,7 @@ bool saveVault(
         return false;
     }
 
-    std::string updated = formatVaultFile(snapshot.salt, nonceHex, encryptedHex.data());
+    std::string updated = formatVaultFile(snapshot.salt, nonceHex, encryptedHex.data(), 2);
     std::string current;
     if (!readLocalFile("vault.json", MAX_VAULT_FILE_SIZE, current) || current != snapshot.bytes)
     {
@@ -244,6 +249,15 @@ bool unlockVault(
         std::cout << "Could not read a valid vault file.\n";
         return false;
     }
+
+    const auto account = auditActor();
+    if (!knownAccount(account) || (header.version == 1 && !ownsLegacyVault(bytes, account)))
+    {
+        logEvent("vault_unlock", "access_denied");
+        std::cout << "Could not authorize this account for the vault.\n";
+        return false;
+    }
+    const std::string binding = header.version == 2 ? ownerBinding(account) : "";
 
     std::vector<unsigned char> salt(crypto_pwhash_SALTBYTES);
     std::vector<unsigned char> nonce(
@@ -288,8 +302,8 @@ bool unlockVault(
         nullptr,
         encryptedData.data(),
         static_cast<unsigned long long>(encryptedData.size()),
-        nullptr,
-        0,
+        reinterpret_cast<const unsigned char*>(binding.data()),
+        binding.size(),
         nonce.data(),
         vaultKey);
 
@@ -306,6 +320,7 @@ bool unlockVault(
         return false;
     }
 
+    snapshot.owner = account;
     snapshot.bytes.swap(bytes);
     snapshot.salt.swap(header.salt);
     wipeOnFailure.keepForSession();
@@ -373,6 +388,7 @@ bool readNewEntry(Entry& entry)
 
 void addEntry(std::deque<Entry>& entries, const unsigned char vaultKey[], VaultSnapshot& snapshot)
 {
+    if (!authorizeRecords(snapshot.owner, "entry_add")) return;
     if (!readNewEntry(entries.emplace_back()))
     {
         entries.pop_back();
@@ -390,8 +406,10 @@ void addEntry(std::deque<Entry>& entries, const unsigned char vaultKey[], VaultS
     logEvent("entry_add", "success");
 }
 
-void viewEntries(const std::deque<Entry>& entries)
+void viewEntries(const std::deque<Entry>& entries, const VaultSnapshot& snapshot)
 {
+    if (!authorizeRecords(snapshot.owner, "entry_view")) return;
+    logEvent("entry_view", "success");
     if (entries.empty())
     {
         std::cout << "There are no entries in this session.\n";
@@ -407,6 +425,56 @@ void viewEntries(const std::deque<Entry>& entries)
         std::cout << "Password: [hidden]\n";
         std::cout << "Notes: " << entries[i].notes << "\n";
     }
+}
+
+void revealPassword(const std::deque<Entry>& entries, const VaultSnapshot& snapshot)
+{
+    if (!authorizeRecords(snapshot.owner, "password_reveal")) return;
+    if (entries.empty())
+    {
+        std::cout << "There are no entries in this session.\n";
+        return;
+    }
+#ifdef _WIN32
+    DWORD mode;
+    const bool terminal = GetConsoleMode(GetStdHandle(STD_OUTPUT_HANDLE), &mode) != 0;
+#else
+    const bool terminal = isatty(STDOUT_FILENO);
+#endif
+    if (!terminal)
+    {
+        std::cout << "Password reveal requires an interactive output terminal.\n";
+        logEvent("password_reveal", "output_rejected");
+        return;
+    }
+
+    std::cout << "Entry number to reveal (1-" << entries.size() << "): " << std::flush;
+    std::string input;
+    if (readBoundedLine(std::cin, input, 20) != InputResult::success || interrupted()) return;
+    std::size_t number = 0;
+    const auto end = input.data() + input.size();
+    const auto parsed = std::from_chars(input.data(), end, number);
+    if (parsed.ec != std::errc{} || parsed.ptr != end || number == 0 || number > entries.size())
+    {
+        std::cout << "Invalid entry number.\n";
+        return;
+    }
+
+    std::cout << "Show the password for " << entries[number - 1].service
+        << " on this terminal? Type yes: " << std::flush;
+    if (readBoundedLine(std::cin, input, 3) != InputResult::success || input != "yes" || interrupted())
+    {
+        std::cout << "Reveal cancelled.\n";
+        return;
+    }
+    if (!isValidPassword(entries[number - 1].password))
+    {
+        std::cout << "Could not display this password.\n";
+        logEvent("password_reveal", "invalid_record");
+        return;
+    }
+    logEvent("password_reveal", "success");
+    std::cout << "Password: " << entries[number - 1].password << '\n';
 }
 
 int runManager()
@@ -470,6 +538,14 @@ int runManager()
 
                 if (menuChoice == "1")
                 {
+                    const auto account = auditActor();
+                    if (!knownAccount(account))
+                    {
+                        std::cout << "Could not identify the vault owner.\n";
+                        logEvent("vault_create", "access_denied");
+                        continue;
+                    }
+                    const auto binding = ownerBinding(account);
                     std::string masterPassword;
                     StringWiper wipeMaster(masterPassword);
                     readPassword("Choose a master password: ", masterPassword);
@@ -526,8 +602,8 @@ int runManager()
                                 &encryptedLength,
                                 reinterpret_cast<const unsigned char*>(emptyVaultData.data()),
                                 static_cast<unsigned long long>(emptyVaultData.size()),
-                                nullptr,
-                                0,
+                                reinterpret_cast<const unsigned char*>(binding.data()),
+                                binding.size(),
                                 nullptr,
                                 nonce,
                                 vaultKey
@@ -551,7 +627,7 @@ int runManager()
                                     encryptedData.size()
                                 );
 
-                                const std::string data = formatVaultFile(saltHex, nonceHex, encryptedHex.data());
+                                const std::string data = formatVaultFile(saltHex, nonceHex, encryptedHex.data(), 2);
                                 if (!interrupted() && writeNewFile("vault.json", data))
                                 {
                                     vaultFileExists = true;
@@ -591,6 +667,7 @@ int runManager()
                 std::cout << "2. View entries\n";
                 std::cout << "3. Lock vault\n";
                 std::cout << "4. Exit\n";
+                std::cout << "5. Reveal one password\n";
                 std::cout << "Choose an option: ";
 
                 if (readBoundedLine(std::cin, menuChoice, 1) == InputResult::endOfInput || interrupted())
@@ -604,8 +681,7 @@ int runManager()
                 }
                 else if (menuChoice == "2")
                 {
-                    viewEntries(entries);
-                    logEvent("entry_view", "success");
+                    viewEntries(entries, snapshot);
                 }
                 else if (menuChoice == "3")
                 {
@@ -624,9 +700,13 @@ int runManager()
                 {
                     userWantsToExit = true;
                 }
+                else if (menuChoice == "5")
+                {
+                    revealPassword(entries, snapshot);
+                }
                 else
                 {
-                    std::cout << "Please choose 1, 2, 3, or 4.\n";
+                    std::cout << "Please choose 1, 2, 3, 4, or 5.\n";
                 }
             }
             else

@@ -66,7 +66,6 @@ bool checkRecordLoading()
     StringWiper wipeData(data);
     serializeEntries(saved, data);
 
-    // This is the exact layout written by the original std::quoted serializer.
     const std::string expected =
         R"("example" "" "" " spaced \"quoted\" " "folder\\name")" "\n" +
         std::string(R"("other" "" "" ")") + second.password + "\" \"\"\n";
@@ -115,14 +114,14 @@ bool checkStoredFieldValidation()
     }
 
     const std::string invalidRows[] = {
-        R"("" "" "" "p" "")",                         // Missing service
-        R"("s" "" "" " " "")",                       // Blank password
+        R"("" "" "" "p" "")",              
+        R"("s" "" "" " " "")",                      
         R"("s" "" "" ")" + std::string(1, char(0x80)) + R"(" "")",
-        R"("s" "" "" "p" "bad\q")",                  // Unknown escape
-        R"("s" "" "" "p" "unfinished\)",              // Incomplete escape
+        R"("s" "" "" "p" "bad\q")",                 
+        R"("s" "" "" "p" "unfinished\)",            
         R"(unquoted "" "" "p" "")",
-        R"("s" "" """p" "")",                        // Missing separator
-        R"("s" "" "" "p")",                          // Missing field
+        R"("s" "" """p" "")",                        
+        R"("s" "" "" "p")",                         
         R"("s" "" "" "p" "" "extra")",
         R"("s" "" "" "p" ")" + std::string(1, '\0') + R"(")"
     };
@@ -136,7 +135,6 @@ bool checkStoredFieldValidation()
         }
     }
 
-    // Each limit counts decoded bytes, even when every character needs escaping.
     std::deque<Entry> rows;
     Entry& row = rows.emplace_back();
     row.service = "s";
@@ -213,6 +211,30 @@ int main()
         return 1;
     }
 
+    {
+        VaultKey lockedKey{};
+        {
+            MemoryLock lock(lockedKey, sizeof lockedKey);
+            std::fill(std::begin(lockedKey), std::end(lockedKey), marker);
+            if (lock.locked() && !allBytesEqual(lockedKey, marker))
+            {
+                std::cerr << "Locked key memory was not usable.\n";
+                return 1;
+            }
+            if (!lock.locked())
+            {
+                std::cerr << "Note: memory locking is not available here (OS limit).\n";
+                sodium_memzero(lockedKey, sizeof lockedKey);
+            }
+        }
+        if (!allBytesEqual(lockedKey, 0))
+        {
+            std::cerr << "Unlocking key memory left key bytes behind.\n";
+            return 1;
+        }
+    }
+    static_assert(!std::is_copy_constructible_v<MemoryLock>);
+
     std::string password;
     if (!checkStringCleanup(password))
     {
@@ -223,6 +245,6 @@ int main()
     {
         return 1;
     }
-    std::cout << "Key cleanup, password cleanup, and record validation checks passed\n";
+    std::cout << "Key cleanup, memory lock, password cleanup, and record validation checks passed\n";
     return 0;
 }

@@ -56,11 +56,43 @@ int main()
     check(!isValidPassword(std::string(257, 'x')), "password rejects 257 characters");
     check(!isValidPassword(std::string(1, static_cast<char>(0x80))), "password rejects non-ASCII bytes");
     check(!isValidNewMasterPassword(std::string(14, 'a')), "new master password rejects 14 characters");
-    check(isValidNewMasterPassword("a long passphrase"), "new master password permits a passphrase without composition rules");
-    check(isValidNewMasterPassword(std::string(15, 'a')), "new master password accepts length boundary");
-    check(isValidNewMasterPassword(std::string(256, 'a')), "new master password accepts upper boundary");
-    check(!isValidNewMasterPassword(std::string(257, 'a')), "new master password rejects upper boundary plus one");
+    check(isValidNewMasterPassword("purple tiger eats noodles"), "new master password permits a passphrase without composition rules");
+    const std::string varied = "Tq7!mZ2#rL9@vX4$";
+
+    std::string upper;
+    unsigned state = 12345;
+    while (upper.size() < MAX_PASSWORD_LENGTH)
+    {
+        state = state * 1103515245U + 12345U;
+        upper.push_back(static_cast<char>(33 + (state >> 16) % 94));
+    }
+    check(isValidNewMasterPassword(varied.substr(0, 15)), "new master password accepts length boundary");
+    check(!isValidNewMasterPassword(varied.substr(0, 14)), "new master password rejects 14 varied characters");
+    check(isValidNewMasterPassword(upper), "new master password accepts upper boundary");
+    check(!isValidNewMasterPassword(upper + "x"), "new master password rejects upper boundary plus one");
     check(!isValidNewMasterPassword(std::string(20, ' ')), "new master password rejects only spaces");
+
+    const char* weak[] = {
+        "aaaaaaaaaaaaaaa", "               x", "aaaaabbbbbccccc",       
+        "passwordpassword", "abcabcabcabcabcabc", "Summer2024Summer2024", 
+        "123456789012345", "987654321098765", "abcdefghijklmnop",        
+        "qwertyuiopasdfgh", "QWERTYUIOPASDFGH", "!@#$%^&*()!@#$%^",      
+        "password1234567", "Password2024!!!!", "P@ssw0rd12345678",       
+        "iloveyouiloveyou1", "letmein123456789", "masterpassword12", "adminadminadmin1"
+    };
+    for (const char* value : weak)
+    {
+        check(!isValidNewMasterPassword(value), value);
+    }
+    const char* strong[] = {
+        "correct horse battery staple", "demo-long-master-phrase", "purple tiger eats noodles",
+        "my password is a long sentence", "8391027465183920", "Riga-Tallinn-train-07"
+    };
+    for (const char* value : strong)
+    {
+        check(isValidNewMasterPassword(value), value);
+    }
+    check(isValidPassword("password"), "weak-password rule does not block unlocking existing vaults");
 
     std::string value;
     std::istringstream exact("abc\n");

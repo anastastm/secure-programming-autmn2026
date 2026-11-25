@@ -17,7 +17,7 @@
 
 
 
-## Implementation status (Checkpoint 3)
+## Implementation status  (Checkpoint 3)
 
 |Threat|Status|
 |-|-|

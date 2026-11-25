@@ -2,9 +2,20 @@
 
 #include "input_validation.h"
 
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#else
+#include <sys/resource.h>
+#ifdef __linux__
+#include <sys/prctl.h>
+#endif
+#endif
+
 using VaultKey = unsigned char[crypto_aead_xchacha20poly1305_ietf_KEYBYTES];
 
-// The referenced array must outlive its guard.
 class VaultKeyWiper
 {
 public:
@@ -21,7 +32,6 @@ public:
         }
     }
 
-    // After a successful unlock, the session's outer guard still owns cleanup.
     void keepForSession() noexcept
     {
         wipeOnExit_ = false;
@@ -32,7 +42,6 @@ private:
     bool wipeOnExit_ = true;
 };
 
-// Declare the guard after the string so the string is still alive during cleanup.
 class StringWiper
 {
 public:
@@ -49,3 +58,40 @@ public:
 private:
     std::string& value_;
 };
+
+class MemoryLock
+{
+public:
+    MemoryLock(void* address, std::size_t length) noexcept
+        : address_(address), length_(length), locked_(sodium_mlock(address, length) == 0) {}
+
+    MemoryLock(const MemoryLock&) = delete;
+    MemoryLock& operator=(const MemoryLock&) = delete;
+
+    ~MemoryLock() noexcept
+    {
+        if (locked_) sodium_munlock(address_, length_);
+    }
+
+    bool locked() const noexcept { return locked_; }
+
+private:
+    void* address_;
+    std::size_t length_;
+    bool locked_;
+};
+
+inline bool hardenProcess() noexcept
+{
+#ifdef _WIN32
+    SetErrorMode(GetErrorMode() | SEM_NOGPFAULTERRORBOX);
+    return true;
+#else
+    struct rlimit noCore{0, 0};
+    bool ok = setrlimit(RLIMIT_CORE, &noCore) == 0;
+#ifdef __linux__
+    ok = prctl(PR_SET_DUMPABLE, 0, 0, 0, 0) == 0 && ok;
+#endif
+    return ok;
+#endif
+}

@@ -3,9 +3,13 @@
 #include "local_files.h"
 #include <ctime>
 #include <iostream>
+#include <string_view>
 #ifdef _WIN32
 #include <sddl.h>
 #endif
+
+constexpr std::size_t MAX_AUDIT_LOG_SIZE = 16U * 1024U * 1024U;
+constexpr std::size_t AUDIT_HASH_HEX_LENGTH = crypto_generichash_BYTES * 2;
 
 inline std::string auditActor()
 {
@@ -51,8 +55,58 @@ inline bool appendAuditLine(const std::string& line)
 #endif
 }
 
-// Callers supply fixed event/result labels. Record contents never enter the log API.
-inline void logEvent(const char* event, const char* result)
+inline std::string auditLineHash(std::string_view line)
+{
+    unsigned char hash[crypto_generichash_BYTES];
+    crypto_generichash(hash, sizeof hash, reinterpret_cast<const unsigned char*>(line.data()),
+        static_cast<unsigned long long>(line.size()), nullptr, 0);
+    char hex[sizeof hash * 2 + 1];
+    sodium_bin2hex(hex, sizeof hex, hash, sizeof hash);
+    return hex;
+}
+
+inline std::string firstAuditHash()
+{
+    return std::string(AUDIT_HASH_HEX_LENGTH, '0');
+}
+
+inline bool verifyAuditChain(const std::string& text, std::string& lastHash)
+{
+    static const std::string_view marker = ",\"prev\":\"";
+    lastHash = firstAuditHash();
+    std::size_t position = 0;
+    while (position < text.size())
+    {
+        const auto end = text.find('\n', position);
+        if (end == std::string::npos) return false;
+        const std::string_view line(text.data() + position, end - position);
+        const std::size_t tail = marker.size() + AUDIT_HASH_HEX_LENGTH + 2;
+        if (line.size() < tail || line.front() != '{' ||
+            line.substr(line.size() - tail, marker.size()) != marker ||
+            line.substr(line.size() - 2) != "\"}" ||
+            line.substr(line.size() - AUDIT_HASH_HEX_LENGTH - 2, AUDIT_HASH_HEX_LENGTH) != lastHash)
+        {
+            return false;
+        }
+        lastHash = auditLineHash(line);
+        position = end + 1;
+    }
+    return true;
+}
+
+struct AuditState
+{
+    bool ready = false;
+    std::string lastHash;
+};
+
+inline AuditState& auditState()
+{
+    static AuditState state;
+    return state;
+}
+
+inline std::string auditTimestamp(const char* format)
 {
     const auto now = std::time(nullptr);
     std::tm utc{};
@@ -61,12 +115,57 @@ inline void logEvent(const char* event, const char* result)
 #else
     bool valid = gmtime_r(&now, &utc) != nullptr;
 #endif
-    char time[32]{};
-    if (valid) std::strftime(time, sizeof time, "%Y-%m-%dT%H:%M:%SZ", &utc);
+    char text[32]{};
+    if (valid) std::strftime(text, sizeof text, format, &utc);
+    return text;
+}
+
+inline void logEvent(const char* event, const char* result);
+
+inline void startAuditChain()
+{
+    AuditState& state = auditState();
+    state.ready = true;
+    state.lastHash = firstAuditHash();
+
+    std::error_code error;
+    const auto status = std::filesystem::symlink_status("vault.audit.log", error);
+    if (status.type() == std::filesystem::file_type::not_found) return;
+
+    std::string text;
+    if (!error && readLocalFile("vault.audit.log", MAX_AUDIT_LOG_SIZE, text) &&
+        verifyAuditChain(text, state.lastHash))
+    {
+        return;
+    }
+
+    const std::string kept = "vault.audit.log.unverified-" + auditTimestamp("%Y%m%dT%H%M%SZ");
+    std::filesystem::rename("vault.audit.log", kept, error);
+    state.lastHash = firstAuditHash();
+    if (error)
+    {
+        std::cout << "Warning: the audit log could not be verified or replaced.\n";
+        logEvent("audit_log", "integrity_failed");
+        return;
+    }
+    std::cout << "Warning: the audit log was changed outside this application or could not be read. "
+        "It was kept as " << kept << " and a new log was started.\n";
+    logEvent("audit_log", "integrity_failed");
+}
+
+inline void logEvent(const char* event, const char* result)
+{
+    AuditState& state = auditState();
+    if (!state.ready) startAuditChain();
+
     static const std::string actor = auditActor();
-    const std::string line = std::string("{\"timestamp\":\"") + time + "\",\"actor\":\"" + actor +
-        "\",\"event\":\"" + event + "\",\"result\":\"" + result + "\"}\n";
-    if (!appendAuditLine(line))
-        std::clog << "Audit file unavailable. Event written to standard error.\n";
-    std::clog << line;
+    const std::string body = "{\"timestamp\":\"" + auditTimestamp("%Y-%m-%dT%H:%M:%SZ") +
+        "\",\"actor\":\"" + actor + "\",\"event\":\"" + event + "\",\"result\":\"" + result +
+        "\",\"prev\":\"" + state.lastHash + "\"}";
+    if (appendAuditLine(body + "\n"))
+    {
+        state.lastHash = auditLineHash(body);
+        return;
+    }
+    std::clog << "Audit file unavailable. Event written to standard error.\n" << body << '\n';
 }

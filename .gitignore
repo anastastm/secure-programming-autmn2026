@@ -103,5 +103,6 @@ vault.json
 vault.lock
 vault.attempts
 vault.audit.log
+vault.audit.log.*
 .env
 .env.*

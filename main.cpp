@@ -23,12 +23,14 @@
 #include "unlock_limit.h"
 #include "vault_file.h"
 #include "vault_access.h"
+#include "vault_crypto.h"
 
 struct VaultSnapshot
 {
     std::string owner;
     std::string bytes;
     std::string salt;
+    int version = 0;
 };
 
 void readPassword(const char* prompt, std::string& password)
@@ -152,7 +154,7 @@ void readPassword(const char* prompt, std::string& password)
 
 bool saveVault(
     const std::deque<Entry>& entries,
-    const unsigned char vaultKey[],
+    const VaultKey& vaultKey,
     VaultSnapshot& snapshot)
 {
     if (!authorizeRecords(snapshot.owner, "vault_save")) return false;
@@ -161,48 +163,15 @@ bool saveVault(
     StringWiper wipePlainData(plainData);
     serializeEntries(entries, plainData);
 
-    unsigned char nonce[
-        crypto_aead_xchacha20poly1305_ietf_NPUBBYTES];
-
-    randombytes_buf(nonce, sizeof nonce);
-
-    std::vector<unsigned char> encryptedData(
-        plainData.size() + crypto_aead_xchacha20poly1305_ietf_ABYTES);
-
-    unsigned long long encryptedLength = 0;
-
-    int encryptResult = crypto_aead_xchacha20poly1305_ietf_encrypt(
-        encryptedData.data(),
-        &encryptedLength,
-        reinterpret_cast<const unsigned char*>(plainData.data()),
-        static_cast<unsigned long long>(plainData.size()),
-        reinterpret_cast<const unsigned char*>(binding.data()),
-        binding.size(),
-        nullptr,
-        nonce,
-        vaultKey);
-
+    std::string nonceHex;
+    std::string encryptedHex;
+    const bool sealed = sealVaultData(plainData, vaultKey, binding, nonceHex, encryptedHex);
     clearString(plainData);
-
-    if (encryptResult != 0)
+    if (!sealed)
     {
         std::cout << "Could not encrypt the entries.\n";
         return false;
     }
-
-    encryptedData.resize(static_cast<std::size_t>(encryptedLength));
-
-    char nonceHex[
-        crypto_aead_xchacha20poly1305_ietf_NPUBBYTES * 2 + 1];
-
-    std::vector<char> encryptedHex(encryptedData.size() * 2 + 1);
-
-    sodium_bin2hex(nonceHex, sizeof nonceHex, nonce, sizeof nonce);
-    sodium_bin2hex(
-        encryptedHex.data(),
-        encryptedHex.size(),
-        encryptedData.data(),
-        encryptedData.size());
 
     if (encryptedHex.size() > MAX_VAULT_FILE_SIZE - 256)
     {
@@ -210,7 +179,8 @@ bool saveVault(
         return false;
     }
 
-    std::string updated = formatVaultFile(snapshot.salt, nonceHex, encryptedHex.data(), 2);
+    const int version = snapshot.version == 1 ? 2 : snapshot.version;
+    std::string updated = formatVaultFile(snapshot.salt, nonceHex.c_str(), encryptedHex.c_str(), version);
     std::string current;
     if (!readLocalFile("vault.json", MAX_VAULT_FILE_SIZE, current) || current != snapshot.bytes)
     {
@@ -220,18 +190,8 @@ bool saveVault(
     }
     if (interrupted() || !replaceLocalFile("vault.json", updated)) return false;
     snapshot.bytes.swap(updated);
+    snapshot.version = version;
     return true;
-}
-
-bool deriveVaultKey(std::string& masterPassword, const unsigned char salt[], VaultKey& key)
-{
-    int result = crypto_pwhash(
-        key, sizeof key, masterPassword.c_str(),
-        static_cast<unsigned long long>(masterPassword.size()), salt,
-        crypto_pwhash_OPSLIMIT_INTERACTIVE, crypto_pwhash_MEMLIMIT_INTERACTIVE,
-        crypto_pwhash_ALG_ARGON2ID13);
-    clearString(masterPassword);
-    return result == 0;
 }
 
 bool unlockVault(
@@ -246,6 +206,7 @@ bool unlockVault(
     VaultFile header;
     if (!readLocalFile("vault.json", MAX_VAULT_FILE_SIZE, bytes) || !parseVaultFile(bytes, header))
     {
+        clearString(masterPassword);
         std::cout << "Could not read a valid vault file.\n";
         return false;
     }
@@ -253,67 +214,35 @@ bool unlockVault(
     const auto account = auditActor();
     if (!knownAccount(account) || (header.version == 1 && !ownsLegacyVault(bytes, account)))
     {
+        clearString(masterPassword);
         logEvent("vault_unlock", "access_denied");
         std::cout << "Could not authorize this account for the vault.\n";
         return false;
     }
-    const std::string binding = header.version == 2 ? ownerBinding(account) : "";
+    const std::string binding = header.version >= 2 ? ownerBinding(account) : "";
 
-    std::vector<unsigned char> salt(crypto_pwhash_SALTBYTES);
-    std::vector<unsigned char> nonce(
-        crypto_aead_xchacha20poly1305_ietf_NPUBBYTES);
-    std::vector<unsigned char> encryptedData(header.encrypted.size() / 2);
-
-    std::size_t saltLength = 0;
-    std::size_t nonceLength = 0;
-    std::size_t encryptedLength = 0;
-
-    if (sodium_hex2bin(
-        salt.data(), salt.size(), header.salt.c_str(), header.salt.size(),
-        nullptr, &saltLength, nullptr) != 0 ||
-        sodium_hex2bin(
-            nonce.data(), nonce.size(), header.nonce.c_str(), header.nonce.size(),
-            nullptr, &nonceLength, nullptr) != 0 ||
-        sodium_hex2bin(
-            encryptedData.data(), encryptedData.size(),
-            header.encrypted.c_str(), header.encrypted.size(),
-            nullptr, &encryptedLength, nullptr) != 0 ||
-        saltLength != salt.size() ||
-        nonceLength != nonce.size() ||
-        encryptedLength != encryptedData.size())
+    VaultBytes decoded;
+    if (!decodeVaultFile(header, decoded))
     {
+        clearString(masterPassword);
         std::cout << "The vault file contains invalid data.\n";
         return false;
     }
 
-    if (!deriveVaultKey(masterPassword, salt.data(), vaultKey))
+    if (!deriveVaultKey(masterPassword, decoded.salt.data(), header.version, vaultKey))
     {
         std::cout << "Could not create the encryption key.\n";
         return false;
     }
 
-    std::string plainData(encryptedData.size(), '\0');
+    std::string plainData;
     StringWiper wipePlainData(plainData);
-    unsigned long long decryptedLength = 0;
-
-    int decryptResult = crypto_aead_xchacha20poly1305_ietf_decrypt(
-        reinterpret_cast<unsigned char*>(plainData.data()),
-        &decryptedLength,
-        nullptr,
-        encryptedData.data(),
-        static_cast<unsigned long long>(encryptedData.size()),
-        reinterpret_cast<const unsigned char*>(binding.data()),
-        binding.size(),
-        nonce.data(),
-        vaultKey);
-
-    if (decryptResult != 0)
+    if (!openVaultData(decoded, vaultKey, binding, plainData))
     {
         std::cout << "Incorrect password, or the vault file is damaged.\n";
         return false;
     }
 
-    plainData.resize(static_cast<std::size_t>(decryptedLength));
     if (parseEntries(plainData, entries) == false)
     {
         std::cout << "The decrypted vault data is invalid.\n";
@@ -323,6 +252,7 @@ bool unlockVault(
     snapshot.owner = account;
     snapshot.bytes.swap(bytes);
     snapshot.salt.swap(header.salt);
+    snapshot.version = header.version;
     wipeOnFailure.keepForSession();
     return true;
 }
@@ -386,7 +316,7 @@ bool readNewEntry(Entry& entry)
     return true;
 }
 
-void addEntry(std::deque<Entry>& entries, const unsigned char vaultKey[], VaultSnapshot& snapshot)
+void addEntry(std::deque<Entry>& entries, const VaultKey& vaultKey, VaultSnapshot& snapshot)
 {
     if (!authorizeRecords(snapshot.owner, "entry_add")) return;
     if (!readNewEntry(entries.emplace_back()))
@@ -485,6 +415,7 @@ int runManager()
         return 1;
     }
 
+    const bool hardened = hardenProcess();
     ConsoleControl console;
     VaultDirectoryLock directoryLock;
     if (!console.start() || !directoryLock.acquire())
@@ -493,6 +424,7 @@ int runManager()
         return 1;
     }
     logEvent("session_start", "success");
+    if (!hardened) logEvent("process_hardening", "partial");
     VaultSnapshot snapshot;
     std::cout << "Crypto library is ready.\n";
     bool userWantsToExit = false;
@@ -501,22 +433,8 @@ int runManager()
     {
         VaultKey sessionVaultKey{};
         VaultKeyWiper wipeOnExit(sessionVaultKey);
-
-        if (!std::filesystem::exists("vault.json") &&
-            std::filesystem::exists("vault.json.bak"))
-        {
-            std::error_code recoveryError;
-            std::filesystem::rename(
-                "vault.json.bak",
-                "vault.json",
-                recoveryError);
-
-            if (recoveryError)
-            {
-                std::cout << "Could not recover the vault file.\n";
-                return 1;
-            }
-        }
+        MemoryLock lockSessionKey(sessionVaultKey, sizeof sessionVaultKey);
+        if (!lockSessionKey.locked()) logEvent("memory_lock", "unavailable");
 
         bool vaultFileExists = std::filesystem::exists("vault.json");
         std::deque<Entry> entries;
@@ -556,7 +474,9 @@ int runManager()
 
                     if (!isValidNewMasterPassword(masterPassword))
                     {
-                        std::cout << "Use 15-256 printable ASCII characters, not only spaces. A long, unique passphrase is recommended.\n";
+                        clearString(masterPassword);
+                        std::cout << "Use 15-256 printable ASCII characters. Avoid repeated characters, sequences "
+                            "such as 12345 or qwerty, and common words. A long, unique passphrase is recommended.\n";
                         logEvent("vault_create", "validation_failed");
                         continue;
                     }
@@ -581,73 +501,37 @@ int runManager()
                         unsigned char salt[crypto_pwhash_SALTBYTES];
                         VaultKey vaultKey{};
                         VaultKeyWiper wipeAfterCreate(vaultKey);
+                        MemoryLock lockCreateKey(vaultKey, sizeof vaultKey);
 
                         randombytes_buf(salt, sizeof salt);
 
-                        if (deriveVaultKey(masterPassword, salt, vaultKey))
+                        std::string nonceHex;
+                        std::string encryptedHex;
+                        if (!deriveVaultKey(masterPassword, salt, CURRENT_VAULT_VERSION, vaultKey))
                         {
-                            const std::string emptyVaultData = "[]";
-
-                            unsigned char nonce[crypto_aead_xchacha20poly1305_ietf_NPUBBYTES];
-                            randombytes_buf(nonce, sizeof nonce);
-
-                            std::vector<unsigned char> encryptedData(
-                                emptyVaultData.size() + crypto_aead_xchacha20poly1305_ietf_ABYTES
-                            );
-
-                            unsigned long long encryptedLength = 0;
-
-                            int encryptResult = crypto_aead_xchacha20poly1305_ietf_encrypt(
-                                encryptedData.data(),
-                                &encryptedLength,
-                                reinterpret_cast<const unsigned char*>(emptyVaultData.data()),
-                                static_cast<unsigned long long>(emptyVaultData.size()),
-                                reinterpret_cast<const unsigned char*>(binding.data()),
-                                binding.size(),
-                                nullptr,
-                                nonce,
-                                vaultKey
-                            );
-
-                            if (encryptResult == 0)
-                            {
-                                encryptedData.resize(static_cast<std::size_t>(encryptedLength));
-
-                                char saltHex[crypto_pwhash_SALTBYTES * 2 + 1];
-                                char nonceHex[crypto_aead_xchacha20poly1305_ietf_NPUBBYTES * 2 + 1];
-
-                                std::vector<char> encryptedHex(encryptedData.size() * 2 + 1);
-
-                                sodium_bin2hex(saltHex, sizeof saltHex, salt, sizeof salt);
-                                sodium_bin2hex(nonceHex, sizeof nonceHex, nonce, sizeof nonce);
-                                sodium_bin2hex(
-                                    encryptedHex.data(),
-                                    encryptedHex.size(),
-                                    encryptedData.data(),
-                                    encryptedData.size()
-                                );
-
-                                const std::string data = formatVaultFile(saltHex, nonceHex, encryptedHex.data(), 2);
-                                if (!interrupted() && writeNewFile("vault.json", data))
-                                {
-                                    vaultFileExists = true;
-                                    std::cout << "Encrypted vault saved to vault.json.\n";
-                                    logEvent("vault_create", "success");
-                                }
-                                else
-                                {
-                                    std::cout << "Could not create the vault file.\n";
-                                    logEvent("vault_create", "write_failed");
-                                }
-                            }
-                            else
-                            {
-                                std::cout << "Could not encrypt the vault data.\n";
-                            }
+                            std::cout << "Could not create the encryption key.\n";
+                        }
+                        else if (!sealVaultData("[]", vaultKey, binding, nonceHex, encryptedHex))
+                        {
+                            std::cout << "Could not encrypt the vault data.\n";
                         }
                         else
                         {
-                            std::cout << "Could not create the encryption key.\n";
+                            const std::string data = formatVaultFile(toHex(salt, sizeof salt),
+                                nonceHex.c_str(), encryptedHex.c_str(), CURRENT_VAULT_VERSION);
+                            if (!interrupted() && writeNewFile("vault.json", data))
+                            {
+                                vaultFileExists = true;
+                                std::cout << "Encrypted vault saved to vault.json.\n";
+                                logEvent("vault_create", "success");
+                                UnlockLimit freshLimit;
+                                if (!freshLimit.reset()) logEvent("unlock_limit", "write_failed");
+                            }
+                            else
+                            {
+                                std::cout << "Could not create the vault file.\n";
+                                logEvent("vault_create", "write_failed");
+                            }
                         }
                     }
                 }
@@ -729,6 +613,19 @@ int runManager()
                     {
                         std::cout << "Could not check the unlock limit. The vault stays locked.\n";
                         logEvent("vault_unlock", "state_error");
+                        continue;
+                    }
+                    if (limit.missing)
+                    {
+                        logEvent("vault_unlock", "counter_missing");
+                        if (!limit.lockBecauseMissing(now))
+                        {
+                            std::cout << "Could not check the unlock limit. The vault stays locked.\n";
+                            logEvent("vault_unlock", "state_error");
+                            continue;
+                        }
+                        std::cout << "The unlock history is missing. Try again in "
+                            << limit.blockedUntil - now << " seconds.\n";
                         continue;
                     }
                     if (limit.blocked(now))

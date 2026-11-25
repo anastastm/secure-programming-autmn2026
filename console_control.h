@@ -7,13 +7,15 @@
 #include <windows.h>
 
 inline volatile LONG stopRequested = 0;
+inline volatile LONG cleanupFinished = 0;
 inline bool interrupted() { return InterlockedCompareExchange(&stopRequested, 0, 0) != 0; }
 
 inline BOOL WINAPI handleConsoleInterrupt(DWORD reason)
 {
-    if (reason != CTRL_C_EVENT && reason != CTRL_BREAK_EVENT) return FALSE;
+    const bool closing = reason == CTRL_CLOSE_EVENT || reason == CTRL_LOGOFF_EVENT ||
+        reason == CTRL_SHUTDOWN_EVENT;
+    if (reason != CTRL_C_EVENT && reason != CTRL_BREAK_EVENT && !closing) return FALSE;
     InterlockedExchange(&stopRequested, 1);
-    // Wake a pending console read so the main thread can clean up.
     INPUT_RECORD enter{};
     enter.EventType = KEY_EVENT;
     enter.Event.KeyEvent.bKeyDown = TRUE;
@@ -22,6 +24,13 @@ inline BOOL WINAPI handleConsoleInterrupt(DWORD reason)
     enter.Event.KeyEvent.uChar.UnicodeChar = L'\r';
     DWORD written;
     WriteConsoleInputW(GetStdHandle(STD_INPUT_HANDLE), &enter, 1, &written);
+    if (closing)
+        for (int waited = 0; waited < 4500 &&
+            InterlockedCompareExchange(&cleanupFinished, 0, 0) == 0; waited += 50)
+        {
+            Sleep(50);
+        }
+    }
     return TRUE;
 }
 
@@ -29,7 +38,11 @@ class ConsoleControl
 {
 public:
     bool start() { return SetConsoleCtrlHandler(handleConsoleInterrupt, TRUE) != 0; }
-    ~ConsoleControl() { SetConsoleCtrlHandler(handleConsoleInterrupt, FALSE); }
+    ~ConsoleControl()
+    {
+        InterlockedExchange(&cleanupFinished, 1);
+        SetConsoleCtrlHandler(handleConsoleInterrupt, FALSE);
+    }
 };
 #else
 #include <csignal>
@@ -65,7 +78,18 @@ public:
         struct sigaction action{};
         action.sa_handler = handleConsoleInterrupt;
         sigemptyset(&action.sa_mask);
-        return sigaction(SIGINT, &action, nullptr) == 0;
+        for (int signalNumber : {SIGINT, SIGQUIT, SIGTERM, SIGHUP})
+        {
+            sigaddset(&action.sa_mask, signalNumber);
+        }
+        for (int signalNumber : {SIGINT, SIGQUIT, SIGTERM, SIGHUP})
+        {
+            if (sigaction(signalNumber, &action, nullptr) != 0) return false;
+        }
+        struct sigaction ignore{};
+        ignore.sa_handler = SIG_IGN;
+        sigemptyset(&ignore.sa_mask);
+        return sigaction(SIGTSTP, &ignore, nullptr) == 0;
     }
 
     ~ConsoleControl()

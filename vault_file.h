@@ -29,7 +29,6 @@ inline bool takeVaultChar(std::istream& in, char expected)
     return in.get() == expected;
 }
 
-// Both supported versions use plain ASCII field names and hexadecimal string values.
 inline bool readVaultString(std::istream& in, std::string& value)
 {
     if (!takeVaultChar(in, '"')) return false;
@@ -57,7 +56,7 @@ inline bool parseVaultFile(const std::string& data, VaultFile& header)
             if (parsed.version != 0) return false;
             skipVaultWhitespace(in);
             int digit = in.get();
-            if (digit != '1' && digit != '2') return false;
+            if (digit < '1' || digit > '3') return false;
             parsed.version = digit - '0';
         }
         else

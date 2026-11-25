@@ -15,3 +15,19 @@
 
 
 
+
+
+## Implementation status (Checkpoint 3)
+
+|Threat|Status|
+|-|-|
+|Brute-forcing the master password|Done: Argon2id ("moderate" cost for new vaults) with a random salt; 5 attempts, then a cooldown that doubles per lockout up to 1 hour; attempts survive restarts; a deleted counter starts a lockout; weak master passwords are rejected.|
+|Password exposure (screen, logs, errors)|Done: masked input, explicit reveal with confirmation, no secrets in logs or error messages.|
+|Stolen vault file|Done: XChaCha20-Poly1305 (authenticated encryption, same security goal as AES-256-GCM).|
+|Modified vault file|Done: the authentication tag is verified before decryption; the file is also compared with the unlocked copy before saving. Not covered: rollback to an older valid copy.|
+|Nonce reuse|Done: a fresh random 24-byte nonce for every save.|
+|Plaintext in temporary files, backups or logs|Done: only encrypted data is written; temporary files hold ciphertext only.|
+|Secrets in memory|Done: key locked in RAM and zeroed; buffers wiped; core dumps and debugger attachment disabled on Linux; Ctrl+C, Ctrl+\\, SIGTERM, SIGHUP and closing the window clean up. Not done: automatic lock after inactivity.|
+|Access without authentication|Done: the vault starts locked; every record operation checks the owner account.|
+|Tampering with the audit log|Done (tamper-evident): hash-chained log lines; a changed log is kept and reported.|
+|Weak generated passwords|Not done: there is no password generator yet.|

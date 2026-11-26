@@ -47,10 +47,12 @@ public:
 #else
 #include <csignal>
 #include <cerrno>
+#include <fcntl.h>
 #include <termios.h>
 #include <unistd.h>
 
 inline volatile std::sig_atomic_t stopRequested = 0;
+inline int emptyInput = -1;
 inline bool interrupted() { return stopRequested != 0; }
 
 inline void handleConsoleInterrupt(int)
@@ -59,7 +61,7 @@ inline void handleConsoleInterrupt(int)
     if (!stopRequested)
     {
         stopRequested = 1;
-        close(STDIN_FILENO);
+        dup2(emptyInput, STDIN_FILENO);
     }
     errno = savedError;
 }
@@ -74,9 +76,15 @@ public:
             terminal = dup(STDIN_FILENO);
             if (terminal < 0 || tcgetattr(terminal, &original) != 0) return false;
             restoreTerminal = true;
+            termios session = original;
+            session.c_lflag |= NOFLSH;
+            if (tcsetattr(terminal, TCSANOW, &session) != 0) return false;
         }
+        emptyInput = open("/dev/null", O_RDONLY | O_CLOEXEC);
+        if (emptyInput < 0) return false;
         struct sigaction action{};
         action.sa_handler = handleConsoleInterrupt;
+        action.sa_flags = SA_RESTART;
         sigemptyset(&action.sa_mask);
         for (int signalNumber : {SIGINT, SIGQUIT, SIGTERM, SIGHUP})
         {
@@ -96,6 +104,7 @@ public:
     {
         if (restoreTerminal) tcsetattr(terminal, interrupted() ? TCSAFLUSH : TCSANOW, &original);
         if (terminal >= 0) close(terminal);
+        if (emptyInput >= 0) close(emptyInput);
     }
 
 private:

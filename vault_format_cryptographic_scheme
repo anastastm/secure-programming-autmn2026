@@ -1,32 +1,53 @@
 Vault format:
-The password manager stores the vault in a JSON file.
+The password manager stores the vault in vault.json, a small JSON file.
 The file contains:
-- a format version;
-- a random salt;
-- a random nonce;
-- encrypted credential data;
-- an authentication tag.
+- a format version (1, 2 or 3; new vaults use 3);
+- a random 16-byte salt (hex);
+- a random 24-byte nonce (hex), new for every save;
+- encrypted_data (hex): the encrypted entries followed by the 16-byte
+  authentication tag.
 
 Example:
 {
-  "version": 1,
+  "version": 3,
   "salt": "...",
   "nonce": "...",
-  "encrypted_data": "...",
-  "authentication_tag": "..."
+  "encrypted_data": "..."
 }
 
-The actual usernames, passwords, and notes are stored inside
+The actual service names, usernames, passwords, and notes are stored inside
 encrypted_data. They are not stored as readable text!!!
+
+Versions:
+- 1: original format, no owner binding, Argon2id "interactive" cost.
+- 2: owner-bound (see step 4 below), Argon2id "interactive" cost.
+  A version 1 vault becomes version 2 on its next save.
+- 3: owner-bound, Argon2id "moderate" cost (about 256 MiB of memory per guess).
+  Used for every new vault. Older vaults keep their cost, because the key
+  cannot be derived again without the master password.
 
 
 ### Cryptographic scheme
 
 The protection process works as follows:
 
-1. The user enters the master password.
-2. The application derives an encryption key from the master password and salt.
-3. The vault data is encrypted using AES-GCM.
-4. A new random nonce is used every time the vault is saved.
-5. The authentication tag checks whether the encrypted vault was modified.
-6. The vault is decrypted only temporarily in memory after successful verification.
+1. The user enters the master password. It is never stored.
+2. The application derives a 32-byte key from the master password and salt
+   with Argon2id (libsodium crypto_pwhash).
+3. The entries are encrypted with XChaCha20-Poly1305
+   (crypto_aead_xchacha20poly1305_ietf), an authenticated encryption scheme.
+4. The owner account ("password-manager/v2/<Linux UID or Windows SID>") is
+   passed as authenticated data. It is not secret, but a different account
+   makes decryption fail.
+5. A new random nonce is used every time the vault is saved.
+6. The authentication tag is checked before any plaintext is accepted. A wrong
+   password, another account, or any changed byte rejects the whole file.
+7. The vault is decrypted only in memory after successful verification. The
+   key is locked in RAM (sodium_mlock) and zeroed when the vault is locked or
+   the program ends.
+
+Related files:
+- vault.attempts: "<failed attempts> <blocked until> <lockouts>" for the
+  brute-force limit (escalating cooldown, 60 s doubling up to 1 hour).
+- vault.audit.log: JSON lines linked by BLAKE2b hashes (tamper-evident).
+- vault.lock: allows one running instance per vault directory.

@@ -1,164 +1,147 @@
 START
-    vaultFileExists = check whether the vault file exists
-    vaultUnlocked = false
+    initialize the crypto library (stop if it fails)
+    disable core dumps and debugger attachment
+    install handlers: Ctrl+C, Ctrl+\, kill, terminal closed -> set stopRequested
+    ignore Ctrl+Z (no suspend while the terminal hides typing)
+    take the single-instance lock on vault.lock (stop if another instance holds it)
+    verify the audit log hash chain
+        IF the chain is broken:
+            keep the old log as vault.audit.log.unverified-<time>
+            start a new log with audit_log / integrity_failed
+            show a warning
+    log session_start
+    sessionKey = empty, locked in RAM
     entries = empty
-    encryptionKey = empty
+    vaultUnlocked = false
     userWantsToExit = false
 
-    REPEAT until userWantsToExit is true:
+    REPEAT until userWantsToExit, stopRequested or end of input:
 
-        IF vaultFileExists is false:
-            show "1. Create vault"
-            show "2. Exit"
-            read menuChoice
-
-            IF menuChoice is "1":
-                run CREATE VAULT steps
-
-            ELSE IF menuChoice is "2":
-                userWantsToExit = true
-
-            ELSE:
-                show "Please choose 1 or 2"
+        IF vault.json does not exist:
+            show "1. Create vault" / "2. Exit"
+            read menuChoice (at most 1 character)
+            "1" -> CREATE VAULT
+            "2" -> userWantsToExit = true
+            other -> show "Please choose 1 or 2"
 
         ELSE IF vaultUnlocked is false:
-            show "Vault is locked"
-            show "1. Unlock vault"
-            show "2. Exit"
+            show "Vault is locked" / "1. Unlock vault" / "2. Exit"
             read menuChoice
-
-            IF menuChoice is "1":
-                run UNLOCK VAULT steps
-
-            ELSE IF menuChoice is "2":
-                userWantsToExit = true
-
-            ELSE:
-                show "Please choose 1 or 2"
+            "1" -> UNLOCK VAULT
+            "2" -> userWantsToExit = true
+            other -> show "Please choose 1 or 2"
 
         ELSE:
-            show "Main menu"
-            show "1. View entries"
-            show "2. Add an entry"
-            show "3. Lock vault"
-            show "4. Save and exit"
+            show "1. Add entry" / "2. View entries" / "3. Lock vault" /
+                 "4. Exit" / "5. Reveal one password"
             read menuChoice
+            "1" -> ADD ENTRY
+            "2" -> VIEW ENTRIES
+            "3" -> LOCK VAULT
+            "4" -> userWantsToExit = true
+            "5" -> REVEAL PASSWORD
+            other -> show "Please choose 1, 2, 3, 4, or 5"
 
-            IF menuChoice is "1":
-                run VIEW ENTRIES steps
-
-            ELSE IF menuChoice is "2":
-                run ADD ENTRY steps
-
-            ELSE IF menuChoice is "3":
-                run LOCK VAULT steps
-
-            ELSE IF menuChoice is "4":
-                save the vault in encrypted form
-
-                IF save succeeds:
-                    clear entries and encryptionKey from the session
-                    vaultUnlocked = false
-                    userWantsToExit = true
-                ELSE:
-                    show "Could not save. The vault is still unlocked."
-                    stay in the main menu
-
-            ELSE:
-                show "Please choose a number from the menu"
-
+    wipe entries and sessionKey
+    log session_end (success or interrupted)
+    restore the terminal settings
     show "Program ended"
 
 
 CREATE VAULT:
+    identify the OS account (stop with access_denied if unknown)
     read a new master password without displaying it
-    read the same master password again without displaying it
-    check that the passwords match and pass input validation
-
-    IF the passwords do not match or the input is invalid:
-        show an error
-        return to the locked menu
-
-    ELSE:
-        create a random salt
-        create an encryption key from the master password and salt
-        set entries to empty
-
-        save the empty vault in encrypted form
-
-        IF save succeeds:
-            vaultFileExists = true
-            vaultUnlocked = true
-            show "Vault created and unlocked"
-        ELSE:
-            clear encryptionKey from the session
-            show "Could not create the vault"
+    IF it is not 15-256 printable ASCII, or it is guessable
+       (few distinct characters, a repeated block, a sequence such as
+        12345 or qwerty, or a common word with a weak remainder):
+        show the password rules, log validation_failed, return
+    read it again without displaying it
+    IF the two do not match:
+        show "The passwords do not match", log confirmation_failed, return
+    create a random salt
+    derive the key with Argon2id (moderate cost) and wipe the master password
+    encrypt "[]" with XChaCha20-Poly1305, a random nonce and
+        the owner account as authenticated data
+    write vault.json (version 3) as a new file, owner-only
+    IF the write succeeds:
+        create vault.attempts as "0 0 0"
+        log vault_create success
+    wipe the temporary key
+    (the vault stays locked; the user unlocks it next)
 
 
 UNLOCK VAULT:
+    load vault.attempts
+    IF it is missing while the vault exists:
+        log counter_missing, start a lockout, show the wait time, return
+    IF it is malformed or a symlink:
+        show "The vault stays locked", log state_error, return
+    IF a cooldown is running:
+        show the remaining seconds, log rate_limited, return
     read the master password without displaying it
-    validate the input
-
-    read the saved vault file
-    create an encryption key from the entered password and saved salt
-    try to decrypt the saved entries and verify the authentication tag
-
-    IF decryption and tag verification succeed:
-        load the decrypted entries into memory
-        keep the encryption key for this session
-        vaultUnlocked = true
-        show "Vault unlocked"
-    ELSE:
-        keep vaultUnlocked = false
-        keep entries empty
-        clear the temporary encryption key
-        show "Could not unlock the vault"
-
-
-VIEW ENTRIES:
-    IF vaultUnlocked is false:
-        deny the request
-        show "Vault is locked"
-    ELSE:
-        show each entry's website or service
-        show each entry's username or email
-        show each password as "[hidden]"
+    record the attempt in vault.attempts BEFORE checking it
+        (5th failure -> cooldown 60 s, doubling each lockout up to 1 hour)
+    IF the password is empty, blank or too long:
+        log validation_failed, return
+    read and strictly parse vault.json
+    check that the current account owns the vault
+    derive the key from the password and the saved salt (wipe the password)
+    decrypt and verify the authentication tag
+    IF verification fails:
+        wipe the key
+        show "Incorrect password, or the vault file is damaged"
+        log failure, return
+    strictly parse every decrypted record (reject the whole vault on any error)
+    reset vault.attempts
+    keep the key and entries for this session
+    vaultUnlocked = true, log vault_unlock success
 
 
 ADD ENTRY:
-    IF vaultUnlocked is false:
-        deny the request
-        show "Vault is locked"
+    check that the current account is the vault owner
+    read service (required, max 100 bytes)
+    read website (optional, max 2048 bytes)
+    read username (optional, max 256 bytes)
+    read password without displaying it (required, 1-256 printable ASCII)
+    read notes (optional, max 2048 bytes)
+    IF any field is invalid (too long, control characters, blank when required):
+        cancel the entry, log input_rejected / validation_failed, return
+    add the entry and SAVE VAULT
+    IF the save fails:
+        remove the entry, show "It was not added", log save_failed
     ELSE:
-        read website or service
-        read username or email
-        read password without displaying it
-        check that the required input is valid
+        log entry_add success
 
-        IF the input is valid:
-            add the entry to entries
-            save the vault in encrypted form
 
-            IF save succeeds:
-                show "Entry saved"
-            ELSE:
-                show "Could not save. The vault is still unlocked."
-        ELSE:
-            show "Entry was not added"
+VIEW ENTRIES:
+    check that the current account is the vault owner
+    show service, website, username and notes of each entry
+    show each password as "[hidden]"
+    log entry_view success
+
+
+REVEAL PASSWORD:
+    check that the current account is the vault owner
+    require an interactive terminal for output
+    read the entry number (digits only, in range)
+    ask "Type yes" to confirm
+    IF confirmed:
+        log password_reveal success
+        show that one password
+    ELSE:
+        show "Reveal cancelled"
 
 
 SAVE VAULT:
-    use the encryption library to encrypt entries with encryptionKey
-    use a new random nonce for this save
-    write the version, salt, KDF settings, nonce,
-        encrypted entries, and authentication tag to the vault file
-    check whether the file was written successfully
+    check that the current account is the vault owner
+    serialize the entries into a wiped buffer
+    encrypt with the session key, a NEW random nonce and the owner binding
+    IF vault.json changed since unlock:
+        show "The vault changed since unlock", log file_changed, fail
+    write a new temporary file (owner-only) and rename it over vault.json
 
 
 LOCK VAULT:
-    IF saving the vault succeeds:
-        clear entries and encryptionKey from the session
-        vaultUnlocked = false
-        show "Vault is locked"
-    ELSE:
-        show "Could not save. The vault is still unlocked."
+    wipe entries and sessionKey
+    vaultUnlocked = false
+    show "Vault locked", log vault_lock success

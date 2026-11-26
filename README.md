@@ -142,6 +142,10 @@ The optional Linux terminal suite uses Python 3 and `pexpect` (`pip install pexp
 python3 tests/terminal_security_tests.py ./build/password_manager
 ```
 
+### Continuous integration
+
+`.github/workflows/build-and-test.yml` builds the project and runs the tests on every push to GitHub: on Ubuntu (all four CTest suites and the terminal suite) and on Windows with Visual Studio and vcpkg (all four CTest suites). The results are on the repository's **Actions** tab.
+
 ## Current limits
 
-This checkpoint supports adding, listing, and explicitly revealing entries. It does not yet support editing, deleting, searching, generating passwords, or automatically locking after inactivity, and it does not detect a rollback to an older vault file. It is a course project and is not intended to replace a professionally reviewed password manager.
+This checkpoint supports adding, listing, and explicitly revealing entries. It does not yet support editing, deleting, or searching entries, and it does not detect a rollback to an older vault file. It is a course project and is not intended to replace a professionally reviewed password manager.

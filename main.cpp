@@ -299,8 +299,12 @@ bool readNewEntry(Entry& entry)
     }
 
     readPassword("Password: ", entry.password);
+    if (!std::cin.good() || interrupted())
+    {
+        return false;
+    }
 
-    if (!std::cin || !isValidPassword(entry.password))
+    if (!isValidPassword(entry.password))
     {
         std::cout << "The entry password must contain 1-256 printable ASCII characters, not only spaces.\n";
         logEvent("entry_add", "validation_failed");
@@ -467,7 +471,7 @@ int runManager()
                     std::string masterPassword;
                     StringWiper wipeMaster(masterPassword);
                     readPassword("Choose a master password: ", masterPassword);
-                    if (!std::cin)
+                    if (!std::cin.good() || interrupted())
                     {
                         break;
                     }
@@ -484,7 +488,7 @@ int runManager()
                     std::string confirmPassword;
                     StringWiper wipeConfirmation(confirmPassword);
                     readPassword("Type it again: ", confirmPassword);
-                    if (!std::cin)
+                    if (!std::cin.good() || interrupted())
                     {
                         break;
                     }
@@ -522,10 +526,10 @@ int runManager()
                             if (!interrupted() && writeNewFile("vault.json", data))
                             {
                                 vaultFileExists = true;
-                                std::cout << "Encrypted vault saved to vault.json.\n";
-                                logEvent("vault_create", "success");
                                 UnlockLimit freshLimit;
                                 if (!freshLimit.reset()) logEvent("unlock_limit", "write_failed");
+                                std::cout << "Encrypted vault saved to vault.json.\n";
+                                logEvent("vault_create", "success");
                             }
                             else
                             {
@@ -639,7 +643,7 @@ int runManager()
                     StringWiper wipeMaster(enteredMasterPassword);
                     readPassword("Enter your master password: ", enteredMasterPassword);
 
-                    if (!std::cin)
+                    if (!std::cin.good() || interrupted())
                     {
                         break;
                     }

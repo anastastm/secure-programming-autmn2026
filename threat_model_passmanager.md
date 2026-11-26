@@ -27,7 +27,7 @@
 |Modified vault file|Done: the authentication tag is verified before decryption; the file is also compared with the unlocked copy before saving. Not covered: rollback to an older valid copy.|
 |Nonce reuse|Done: a fresh random 24-byte nonce for every save.|
 |Plaintext in temporary files, backups or logs|Done: only encrypted data is written; temporary files hold ciphertext only.|
-|Secrets in memory|Done: key locked in RAM and zeroed; buffers wiped; core dumps and debugger attachment disabled on Linux; Ctrl+C, Ctrl+\\, SIGTERM, SIGHUP and closing the window clean up. Not done: automatic lock after inactivity.|
+|Secrets in memory|Done: key locked in RAM and zeroed; buffers wiped; core dumps and debugger attachment disabled on Linux; Ctrl+C, Ctrl+\\, SIGTERM, SIGHUP and closing the window clean up.|
 |Access without authentication|Done: the vault starts locked; every record operation checks the owner account.|
 |Tampering with the audit log|Done (tamper-evident): hash-chained log lines; a changed log is kept and reported.|
-|Weak generated passwords|Not done: there is no password generator yet.|
+|Weak passwords|Not applicable to generation: the application does not generate passwords. Weak master passwords are rejected at vault creation.|

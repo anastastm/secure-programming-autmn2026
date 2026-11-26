@@ -233,7 +233,7 @@ def check_signals_and_tampering(directory):
         app.close()
         assert app.exitstatus == 0
         assert (last_event(directory)["event"], last_event(directory)["result"]) == ("session_end", "interrupted")
-        reset_counter(directory)
+        assert (folder / "vault.attempts").read_text().strip() == "0 0 0"
 
     app = start(directory)
     choose(app, 1)

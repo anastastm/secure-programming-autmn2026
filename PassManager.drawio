@@ -1,71 +1,27 @@
 <mxfile host="app.diagrams.net">
-  <diagram name="Page-1" id="lPjqVUHhCjf2OUJ5QcRO">
+  <diagram name="Page-1" id="passmanager-cp3">
     <mxGraphModel dx="2562" dy="1707" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="827" pageHeight="1169" math="0" shadow="0">
       <root>
         <mxCell id="0" />
         <mxCell id="1" parent="0" />
-        <mxCell id="9WVEo1uETbsfiN-eSXl2-1" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fontSize=18;spacing=14;labelBackgroundColor=none;" value="&lt;b&gt;User&lt;/b&gt;&lt;br&gt;&lt;br&gt;Provides master password&lt;br&gt;Chooses an action" vertex="1">
-          <mxGeometry height="150" width="220" x="30" y="185" as="geometry" />
-        </mxCell>
-        <mxCell id="9WVEo1uETbsfiN-eSXl2-2" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fontSize=18;spacing=14;labelBackgroundColor=none;" value="&lt;b&gt;User Interface&lt;/b&gt;&lt;br&gt;&lt;br&gt;CLI or GUI&lt;br&gt;Add / view / edit / delete&lt;br&gt;Displays only requested result" vertex="1">
-          <mxGeometry height="220" width="320" x="370" y="150" as="geometry" />
-        </mxCell>
-        <mxCell id="9WVEo1uETbsfiN-eSXl2-3" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fontSize=18;spacing=14;labelBackgroundColor=none;" value="&lt;b&gt;User-Management Module&lt;/b&gt;&lt;br&gt;&lt;br&gt;Verify / derive key&lt;br&gt;Manage unlocked session&lt;br&gt;Approve requested action" vertex="1">
-          <mxGeometry height="220" width="360" x="860" y="150" as="geometry" />
-        </mxCell>
-        <mxCell id="9WVEo1uETbsfiN-eSXl2-4" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fontSize=18;spacing=14;labelBackgroundColor=none;" value="&lt;b&gt;Encryption Module&lt;/b&gt;&lt;br&gt;&lt;br&gt;Uses KDF-derived key&lt;br&gt;Encrypts / decrypts vault&lt;br&gt;AES-GCM or ChaCha20-Poly1305&lt;br&gt;Checks authentication tag" vertex="1">
-          <mxGeometry height="240" width="380" x="1390" y="140" as="geometry" />
-        </mxCell>
-        <mxCell id="9WVEo1uETbsfiN-eSXl2-5" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fontSize=18;spacing=14;labelBackgroundColor=none;" value="&lt;b&gt;Storage Layer&lt;/b&gt;&lt;br&gt;&lt;br&gt;Local vault file&lt;br&gt;Salt + KDF parameters&lt;br&gt;Nonce + ciphertext + tag&lt;br&gt;&lt;b&gt;No plaintext passwords&lt;/b&gt;" vertex="1">
-          <mxGeometry height="240" width="380" x="1940" y="140" as="geometry" />
-        </mxCell>
-        <mxCell id="9WVEo1uETbsfiN-eSXl2-6" edge="1" parent="1" source="9WVEo1uETbsfiN-eSXl2-1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;strokeWidth=3;fontSize=22;fontStyle=1;labelBackgroundColor=none;fontColor=default;" target="9WVEo1uETbsfiN-eSXl2-2" value="1">
-          <mxGeometry relative="1" as="geometry" />
-        </mxCell>
-        <mxCell id="9WVEo1uETbsfiN-eSXl2-7" edge="1" parent="1" source="9WVEo1uETbsfiN-eSXl2-2" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;strokeWidth=3;fontSize=22;fontStyle=1;labelBackgroundColor=none;fontColor=default;" target="9WVEo1uETbsfiN-eSXl2-3" value="2">
-          <mxGeometry relative="1" as="geometry" />
-        </mxCell>
-        <mxCell id="9WVEo1uETbsfiN-eSXl2-8" edge="1" parent="1" source="9WVEo1uETbsfiN-eSXl2-3" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;strokeWidth=3;fontSize=22;fontStyle=1;labelBackgroundColor=none;fontColor=default;" target="9WVEo1uETbsfiN-eSXl2-4" value="3">
-          <mxGeometry relative="1" as="geometry" />
-        </mxCell>
-        <mxCell id="9WVEo1uETbsfiN-eSXl2-9" edge="1" parent="1" source="9WVEo1uETbsfiN-eSXl2-4" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;strokeWidth=3;fontSize=22;fontStyle=1;labelBackgroundColor=none;fontColor=default;" target="9WVEo1uETbsfiN-eSXl2-5" value="4">
-          <mxGeometry relative="1" as="geometry" />
-        </mxCell>
-        <mxCell id="9WVEo1uETbsfiN-eSXl2-10" edge="1" parent="1" source="9WVEo1uETbsfiN-eSXl2-5" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;strokeWidth=3;dashed=1;fontSize=22;fontStyle=1;labelBackgroundColor=none;exitX=0;exitY=1;exitDx=0;exitDy=0;entryX=1;entryY=1;entryDx=0;entryDy=0;fontColor=default;" target="9WVEo1uETbsfiN-eSXl2-4" value="5">
-          <mxGeometry relative="1" as="geometry">
-            <Array as="points">
-              <mxPoint x="1940" y="545" />
-              <mxPoint x="1770" y="545" />
-            </Array>
-          </mxGeometry>
-        </mxCell>
-        <mxCell id="9WVEo1uETbsfiN-eSXl2-11" edge="1" parent="1" source="9WVEo1uETbsfiN-eSXl2-4" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;strokeWidth=3;dashed=1;fontSize=22;fontStyle=1;labelBackgroundColor=none;exitX=0;exitY=1;exitDx=0;exitDy=0;entryX=1;entryY=1;entryDx=0;entryDy=0;fontColor=default;" target="9WVEo1uETbsfiN-eSXl2-3" value="6">
-          <mxGeometry relative="1" as="geometry">
-            <Array as="points">
-              <mxPoint x="1340" y="550" />
-              <mxPoint x="1270" y="550" />
-            </Array>
-          </mxGeometry>
-        </mxCell>
-        <mxCell id="9WVEo1uETbsfiN-eSXl2-12" edge="1" parent="1" source="9WVEo1uETbsfiN-eSXl2-3" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;strokeWidth=3;dashed=1;fontSize=22;fontStyle=1;labelBackgroundColor=none;exitX=0;exitY=1;exitDx=0;exitDy=0;entryX=1;entryY=1;entryDx=0;entryDy=0;fontColor=default;" target="9WVEo1uETbsfiN-eSXl2-2" value="7">
-          <mxGeometry relative="1" as="geometry">
-            <Array as="points">
-              <mxPoint x="860" y="545" />
-              <mxPoint x="690" y="545" />
-            </Array>
-          </mxGeometry>
-        </mxCell>
-        <mxCell id="9WVEo1uETbsfiN-eSXl2-13" edge="1" parent="1" source="9WVEo1uETbsfiN-eSXl2-2" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;strokeWidth=3;dashed=1;fontSize=22;fontStyle=1;labelBackgroundColor=none;exitX=0;exitY=1;exitDx=0;exitDy=0;entryX=1;entryY=1;entryDx=0;entryDy=0;fontColor=default;" target="9WVEo1uETbsfiN-eSXl2-1" value="8">
-          <mxGeometry relative="1" as="geometry">
-            <Array as="points">
-              <mxPoint x="370" y="565" />
-              <mxPoint x="250" y="565" />
-            </Array>
-          </mxGeometry>
-        </mxCell>
-        <mxCell id="9WVEo1uETbsfiN-eSXl2-14" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fontSize=17;spacing=14;labelBackgroundColor=none;align=left;" value="&lt;div align=&quot;left&quot;&gt;&lt;b&gt;1.&lt;/b&gt; User → interface: master password, login request, and password-management actions (view, add, edit, delete).&lt;br&gt;&lt;b&gt;2.&lt;/b&gt; Interface → user management: authentication request, action, and when adding/editing - temporary plaintext credential data.&lt;br&gt;&lt;b&gt;3.&lt;/b&gt; User management → encryption: after successful authentication, send the derived key, encryption request, and credential data that must be encrypted.&lt;div&gt;&lt;b&gt;4.&lt;/b&gt; Encryption → storage:&amp;nbsp;save the encrypted package: salt, KDF parameters, nonce, ciphertext, and authentication tag.&lt;/div&gt;&lt;div&gt;&lt;b&gt;5.&lt;/b&gt; Storage → encryption: encrypted credential/vault data requested by the user&lt;/div&gt;&lt;b&gt;6.&lt;/b&gt; Encryption → user management: verified and decrypted vault in memory.&lt;br&gt;&lt;b&gt;7.&lt;/b&gt; User management → interface: requested result or error.&lt;br&gt;&lt;b&gt;8.&lt;/b&gt; Interface → user: display result. Plaintext data is not written to storage.&lt;/div&gt;" vertex="1">
-          <mxGeometry height="240" width="1220" x="640" y="700" as="geometry" />
-        </mxCell>
+        <mxCell id="user" value="&lt;b&gt;User&lt;/b&gt;&lt;br&gt;&lt;br&gt;Types the master password&lt;br&gt;(hidden input)&lt;br&gt;Chooses a menu action&lt;br&gt;Fills in entry fields" style="rounded=0;whiteSpace=wrap;html=1;fontSize=15;spacing=12;verticalAlign=top;" vertex="1" parent="1"><mxGeometry x="0" y="90" width="220" height="170" as="geometry"/></mxCell>
+        <mxCell id="ui" value="&lt;b&gt;User Interface&lt;/b&gt;&lt;br&gt;&lt;i&gt;main.cpp, input_validation.h, console_control.h&lt;/i&gt;&lt;br&gt;&lt;br&gt;CLI menus: create, unlock, add,&lt;br&gt;view, reveal one password, lock&lt;br&gt;Validates every field (length,&lt;br&gt;control characters, blank values)&lt;br&gt;Generic error messages only&lt;br&gt;Ctrl+C / kill: clean exit" style="rounded=0;whiteSpace=wrap;html=1;fontSize=15;spacing=12;verticalAlign=top;" vertex="1" parent="1"><mxGeometry x="340" y="40" width="320" height="300" as="geometry"/></mxCell>
+        <mxCell id="acc" value="&lt;b&gt;Access and Session&lt;/b&gt;&lt;br&gt;&lt;i&gt;vault_access.h, unlock_limit.h, secret_cleanup.h&lt;/i&gt;&lt;br&gt;&lt;br&gt;Owner account checked on&lt;br&gt;every record operation&lt;br&gt;Attempt counted before the check:&lt;br&gt;5 tries, then 60 s, doubling to 1 h&lt;br&gt;Session key locked in RAM,&lt;br&gt;wiped on lock and exit" style="rounded=0;whiteSpace=wrap;html=1;fontSize=15;spacing=12;verticalAlign=top;" vertex="1" parent="1"><mxGeometry x="780" y="40" width="320" height="300" as="geometry"/></mxCell>
+        <mxCell id="enc" value="&lt;b&gt;Encryption Module&lt;/b&gt;&lt;br&gt;&lt;i&gt;vault_crypto.h (libsodium)&lt;/i&gt;&lt;br&gt;&lt;br&gt;Argon2id key derivation&lt;br&gt;(256 MiB per guess)&lt;br&gt;XChaCha20-Poly1305&lt;br&gt;Owner account as authenticated data&lt;br&gt;New random nonce on every save&lt;br&gt;Tag checked before any data is used" style="rounded=0;whiteSpace=wrap;html=1;fontSize=15;spacing=12;verticalAlign=top;" vertex="1" parent="1"><mxGeometry x="1220" y="40" width="320" height="300" as="geometry"/></mxCell>
+        <mxCell id="sto" value="&lt;b&gt;Storage Layer&lt;/b&gt;&lt;br&gt;&lt;i&gt;vault_file.h, vault_records.h, local_files.h&lt;/i&gt;&lt;br&gt;&lt;br&gt;vault.json: version, salt,&lt;br&gt;nonce, ciphertext + tag&lt;br&gt;vault.attempts: attempt counter&lt;br&gt;Owner-only files, no symlinks,&lt;br&gt;atomic replace, strict parsing&lt;br&gt;&lt;b&gt;No plaintext passwords&lt;/b&gt;" style="rounded=0;whiteSpace=wrap;html=1;fontSize=15;spacing=12;verticalAlign=top;" vertex="1" parent="1"><mxGeometry x="1660" y="40" width="320" height="300" as="geometry"/></mxCell>
+        <mxCell id="audit" value="&lt;b&gt;Audit Log&lt;/b&gt;  &lt;i&gt;audit_log.h → vault.audit.log&lt;/i&gt;&lt;br&gt;&lt;br&gt;One JSON line per event: UTC time, OS account, event, result.&lt;br&gt;Each line holds the hash of the previous one (tamper-evident). &lt;b&gt;No secrets.&lt;/b&gt;" style="rounded=0;whiteSpace=wrap;html=1;fontSize=15;spacing=12;verticalAlign=top;dashed=1;" vertex="1" parent="1"><mxGeometry x="340" y="470" width="760" height="110" as="geometry"/></mxCell>
+        <mxCell id="e1" value="1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeWidth=2;fontSize=15;fontStyle=1;labelBackgroundColor=#ffffff;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="1" source="user" target="ui"><mxGeometry relative="1" as="geometry"></mxGeometry></mxCell>
+        <mxCell id="e2" value="2" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeWidth=2;fontSize=15;fontStyle=1;labelBackgroundColor=#ffffff;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="1" source="ui" target="acc"><mxGeometry relative="1" as="geometry"></mxGeometry></mxCell>
+        <mxCell id="e3" value="3" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeWidth=2;fontSize=15;fontStyle=1;labelBackgroundColor=#ffffff;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="1" source="acc" target="enc"><mxGeometry relative="1" as="geometry"></mxGeometry></mxCell>
+        <mxCell id="e4" value="4" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeWidth=2;fontSize=15;fontStyle=1;labelBackgroundColor=#ffffff;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="1" source="enc" target="sto"><mxGeometry relative="1" as="geometry"></mxGeometry></mxCell>
+        <mxCell id="e5" value="5" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeWidth=2;dashed=1;fontSize=15;fontStyle=1;labelBackgroundColor=#ffffff;exitX=0;exitY=1;entryX=1;entryY=1;" edge="1" parent="1" source="sto" target="enc"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="1660" y="410"/><mxPoint x="1540" y="410"/></Array></mxGeometry></mxCell>
+        <mxCell id="e6" value="6" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeWidth=2;dashed=1;fontSize=15;fontStyle=1;labelBackgroundColor=#ffffff;exitX=0;exitY=1;entryX=1;entryY=1;" edge="1" parent="1" source="enc" target="acc"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="1220" y="410"/><mxPoint x="1100" y="410"/></Array></mxGeometry></mxCell>
+        <mxCell id="e7" value="7" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeWidth=2;dashed=1;fontSize=15;fontStyle=1;labelBackgroundColor=#ffffff;exitX=0;exitY=1;entryX=1;entryY=1;" edge="1" parent="1" source="acc" target="ui"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="780" y="410"/><mxPoint x="660" y="410"/></Array></mxGeometry></mxCell>
+        <mxCell id="e8" value="8" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeWidth=2;dashed=1;fontSize=15;fontStyle=1;labelBackgroundColor=#ffffff;exitX=0;exitY=1;entryX=1;entryY=1;" edge="1" parent="1" source="ui" target="user"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="340" y="410"/><mxPoint x="220" y="410"/></Array></mxGeometry></mxCell>
+        <mxCell id="a1" value="A" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=open;endFill=0;strokeWidth=1.5;dashed=1;dashPattern=2 4;fontSize=15;fontStyle=1;labelBackgroundColor=#ffffff;exitX=0.5;exitY=1;entryX=0.21;entryY=0;" edge="1" parent="1" source="ui" target="audit"><mxGeometry relative="1" as="geometry"></mxGeometry></mxCell>
+        <mxCell id="a2" value="A" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=open;endFill=0;strokeWidth=1.5;dashed=1;dashPattern=2 4;fontSize=15;fontStyle=1;labelBackgroundColor=#ffffff;exitX=0.5;exitY=1;entryX=0.79;entryY=0;" edge="1" parent="1" source="acc" target="audit"><mxGeometry relative="1" as="geometry"></mxGeometry></mxCell>
+        <mxCell id="legend" value="&lt;div align=&quot;left&quot;&gt;&lt;b&gt;1.&lt;/b&gt; User → interface: master password (typed hidden), menu choice, entry fields.&lt;br&gt;&lt;b&gt;2.&lt;/b&gt; Interface → access: validated request (unlock, add, view, reveal, lock). Invalid input is rejected here with a generic message.&lt;br&gt;&lt;b&gt;3.&lt;/b&gt; Access → encryption: after the attempt is counted and the owner is checked, the master password (unlock) or the session key and entries (save).&lt;br&gt;&lt;b&gt;4.&lt;/b&gt; Encryption → storage: version, salt, nonce, ciphertext and tag, written to a new file and renamed over vault.json.&lt;br&gt;&lt;b&gt;5.&lt;/b&gt; Storage → encryption: vault.json, read and strictly parsed.&lt;br&gt;&lt;b&gt;6.&lt;/b&gt; Encryption → access: decrypted entries, only if the authentication tag is valid. The master password is wiped after key derivation.&lt;br&gt;&lt;b&gt;7.&lt;/b&gt; Access → interface: requested result or a generic error. Passwords stay [hidden] until a reveal is confirmed with yes.&lt;br&gt;&lt;b&gt;8.&lt;/b&gt; Interface → user: display result. Plaintext is never written to disk.&lt;br&gt;&lt;b&gt;A.&lt;/b&gt; Interface and access → audit log: fixed event labels only (session, create, unlock, add, view, reveal, lock, rate limit, access denied, integrity).&lt;/div&gt;" style="rounded=0;whiteSpace=wrap;html=1;fontSize=14;spacing=14;align=left;verticalAlign=middle;" vertex="1" parent="1"><mxGeometry x="340" y="640" width="1640" height="210" as="geometry"/></mxCell>
+        <mxCell id="title" value="&lt;b&gt;PassManager: data flow and security controls (Checkpoint 3)&lt;/b&gt;" style="text;html=1;fontSize=20;align=left;verticalAlign=middle;" vertex="1" parent="1"><mxGeometry x="0" y="-30" width="900" height="40" as="geometry"/></mxCell>
       </root>
     </mxGraphModel>
   </diagram>

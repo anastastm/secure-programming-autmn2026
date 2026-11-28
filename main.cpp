@@ -24,6 +24,7 @@
 #include "vault_file.h"
 #include "vault_access.h"
 #include "vault_crypto.h"
+#include "clipboard.h"
 
 struct VaultSnapshot
 {
@@ -361,54 +362,174 @@ void viewEntries(const std::deque<Entry>& entries, const VaultSnapshot& snapshot
     }
 }
 
-void revealPassword(const std::deque<Entry>& entries, const VaultSnapshot& snapshot)
+std::size_t readEntryNumber(const char* action, std::size_t count)
 {
-    if (!authorizeRecords(snapshot.owner, "password_reveal")) return;
+    std::cout << "Entry number to " << action << " (1-" << count << "): " << std::flush;
+    std::string input;
+    if (readBoundedLine(std::cin, input, 20) != InputResult::success || interrupted()) return 0;
+    std::size_t number = 0;
+    const auto end = input.data() + input.size();
+    const auto parsed = std::from_chars(input.data(), end, number);
+    if (parsed.ec != std::errc{} || parsed.ptr != end || number == 0 || number > count)
+    {
+        std::cout << "Invalid entry number.\n";
+        return 0;
+    }
+    return number;
+}
+
+bool confirmWithYes(const std::string& question)
+{
+    std::cout << question << " Type yes: " << std::flush;
+    std::string input;
+    return readBoundedLine(std::cin, input, 3) == InputResult::success && input == "yes" && !interrupted();
+}
+
+bool readEditedField(const char* prompt, std::string& value, std::size_t maxLength, bool required, bool& changed)
+{
+    std::string input;
+    StringWiper wipeInput(input);
+    std::cout << prompt << std::flush;
+    const InputResult result = readBoundedLine(std::cin, input, maxLength);
+    if (interrupted() || result == InputResult::endOfInput) return false;
+    if (input.empty()) return true;
+    if (result == InputResult::tooLong || !isValidField(input, maxLength, required))
+    {
+        std::cout << "Invalid field. Maximum length: " << maxLength
+            << " bytes. Control characters are not allowed.";
+        if (required) std::cout << " A non-blank value is required.";
+        std::cout << '\n';
+        return false;
+    }
+    value.swap(input);
+    changed = true;
+    return true;
+}
+
+void editEntry(std::deque<Entry>& entries, const VaultKey& vaultKey, VaultSnapshot& snapshot)
+{
+    if (!authorizeRecords(snapshot.owner, "entry_edit")) return;
     if (entries.empty())
     {
         std::cout << "There are no entries in this session.\n";
         return;
     }
-#ifdef _WIN32
-    DWORD mode;
-    const bool terminal = GetConsoleMode(GetStdHandle(STD_OUTPUT_HANDLE), &mode) != 0;
-#else
-    const bool terminal = isatty(STDOUT_FILENO);
-#endif
-    if (!terminal)
+    const std::size_t number = readEntryNumber("edit", entries.size());
+    if (number == 0) return;
+    Entry& current = entries[number - 1];
+
+    Entry edited;
+    edited.service = current.service;
+    edited.website = current.website;
+    edited.username = current.username;
+    edited.password = current.password;
+    edited.notes = current.notes;
+
+    std::cout << "Editing " << current.service << ". Press Enter to keep a value.\n";
+    bool changed = false;
+    if (!readEditedField("Service name: ", edited.service, MAX_SERVICE_LENGTH, true, changed) ||
+        !readEditedField("Website: ", edited.website, MAX_WEBSITE_LENGTH, false, changed) ||
+        !readEditedField("Username: ", edited.username, MAX_USERNAME_LENGTH, false, changed))
     {
-        std::cout << "Password reveal requires an interactive output terminal.\n";
-        logEvent("password_reveal", "output_rejected");
+        if (!interrupted()) logEvent("entry_edit", "input_rejected");
         return;
     }
 
-    std::cout << "Entry number to reveal (1-" << entries.size() << "): " << std::flush;
-    std::string input;
-    if (readBoundedLine(std::cin, input, 20) != InputResult::success || interrupted()) return;
-    std::size_t number = 0;
-    const auto end = input.data() + input.size();
-    const auto parsed = std::from_chars(input.data(), end, number);
-    if (parsed.ec != std::errc{} || parsed.ptr != end || number == 0 || number > entries.size())
+    std::string newPassword;
+    StringWiper wipePassword(newPassword);
+    readPassword("New password (Enter keeps the current one): ", newPassword);
+    if (!std::cin.good() || interrupted()) return;
+    if (!newPassword.empty())
     {
-        std::cout << "Invalid entry number.\n";
+        if (!isValidPassword(newPassword))
+        {
+            std::cout << "The entry password must contain 1-256 printable ASCII characters, not only spaces.\n";
+            logEvent("entry_edit", "validation_failed");
+            return;
+        }
+        edited.password.swap(newPassword);
+        changed = true;
+    }
+
+    if (!readEditedField("Notes: ", edited.notes, MAX_NOTES_LENGTH, false, changed))
+    {
+        if (!interrupted()) logEvent("entry_edit", "input_rejected");
+        return;
+    }
+    if (!changed)
+    {
+        std::cout << "Nothing was changed.\n";
         return;
     }
 
-    std::cout << "Show the password for " << entries[number - 1].service
-        << " on this terminal? Type yes: " << std::flush;
-    if (readBoundedLine(std::cin, input, 3) != InputResult::success || input != "yes" || interrupted())
+    current.swapFields(edited);
+    if (!saveVault(entries, vaultKey, snapshot))
     {
-        std::cout << "Reveal cancelled.\n";
+        current.swapFields(edited);
+        std::cout << "Could not save the change. The entry was not changed.\n";
+        logEvent("entry_edit", "save_failed");
         return;
     }
-    if (!isValidPassword(entries[number - 1].password))
+    std::cout << "Entry updated and saved to the encrypted vault.\n";
+    logEvent("entry_edit", "success");
+}
+
+void deleteEntry(std::deque<Entry>& entries, const VaultKey& vaultKey, VaultSnapshot& snapshot)
+{
+    if (!authorizeRecords(snapshot.owner, "entry_delete")) return;
+    if (entries.empty())
     {
-        std::cout << "Could not display this password.\n";
-        logEvent("password_reveal", "invalid_record");
+        std::cout << "There are no entries in this session.\n";
         return;
     }
-    logEvent("password_reveal", "success");
-    std::cout << "Password: " << entries[number - 1].password << '\n';
+    const std::size_t number = readEntryNumber("delete", entries.size());
+    if (number == 0) return;
+    if (!confirmWithYes("Delete the entry for " + entries[number - 1].service + "?"))
+    {
+        std::cout << "Delete cancelled.\n";
+        return;
+    }
+
+    const auto position = entries.begin() + static_cast<std::ptrdiff_t>(number - 1);
+    Entry removed(std::move(*position));
+    entries.erase(position);
+    if (!saveVault(entries, vaultKey, snapshot))
+    {
+        entries.emplace(entries.begin() + static_cast<std::ptrdiff_t>(number - 1), std::move(removed));
+        std::cout << "Could not save the change. The entry was not deleted.\n";
+        logEvent("entry_delete", "save_failed");
+        return;
+    }
+    std::cout << "Entry deleted and the encrypted vault saved.\n";
+    logEvent("entry_delete", "success");
+}
+
+void copyPassword(const std::deque<Entry>& entries, const VaultSnapshot& snapshot, ClipboardGuard& clipboard)
+{
+    if (!authorizeRecords(snapshot.owner, "password_copy")) return;
+    if (entries.empty())
+    {
+        std::cout << "There are no entries in this session.\n";
+        return;
+    }
+    const std::size_t number = readEntryNumber("copy", entries.size());
+    if (number == 0) return;
+    const Entry& entry = entries[number - 1];
+    if (!isValidPassword(entry.password))
+    {
+        std::cout << "Could not copy this password.\n";
+        logEvent("password_copy", "invalid_record");
+        return;
+    }
+    if (!clipboard.copy(entry.password))
+    {
+        std::cout << "Could not use the clipboard. The password was not shown or copied.\n";
+        logEvent("password_copy", "clipboard_unavailable");
+        return;
+    }
+    std::cout << "Password for " << entry.service << " copied to the clipboard. It will be cleared in "
+        << CLIPBOARD_CLEAR_SECONDS << " seconds.\n";
+    logEvent("password_copy", "success");
 }
 
 int runManager()
@@ -439,6 +560,7 @@ int runManager()
         VaultKeyWiper wipeOnExit(sessionVaultKey);
         MemoryLock lockSessionKey(sessionVaultKey, sizeof sessionVaultKey);
         if (!lockSessionKey.locked()) logEvent("memory_lock", "unavailable");
+        ClipboardGuard clipboard;
 
         bool vaultFileExists = std::filesystem::exists("vault.json");
         std::deque<Entry> entries;
@@ -553,9 +675,11 @@ int runManager()
                 std::cout << "\nVault is unlocked.\n";
                 std::cout << "1. Add entry\n";
                 std::cout << "2. View entries\n";
-                std::cout << "3. Lock vault\n";
-                std::cout << "4. Exit\n";
-                std::cout << "5. Reveal one password\n";
+                std::cout << "3. Edit entry\n";
+                std::cout << "4. Delete entry\n";
+                std::cout << "5. Copy a password\n";
+                std::cout << "6. Lock vault\n";
+                std::cout << "7. Exit\n";
                 std::cout << "Choose an option: ";
 
                 if (readBoundedLine(std::cin, menuChoice, 1) == InputResult::endOfInput || interrupted())
@@ -573,6 +697,19 @@ int runManager()
                 }
                 else if (menuChoice == "3")
                 {
+                    editEntry(entries, sessionVaultKey, snapshot);
+                }
+                else if (menuChoice == "4")
+                {
+                    deleteEntry(entries, sessionVaultKey, snapshot);
+                }
+                else if (menuChoice == "5")
+                {
+                    copyPassword(entries, snapshot, clipboard);
+                }
+                else if (menuChoice == "6")
+                {
+                    clipboard.clearNow();
                     entries.clear();
 
                     sodium_memzero(
@@ -584,17 +721,13 @@ int runManager()
                     std::cout << "Vault locked.\n";
                     logEvent("vault_lock", "success");
                 }
-                else if (menuChoice == "4")
+                else if (menuChoice == "7")
                 {
                     userWantsToExit = true;
                 }
-                else if (menuChoice == "5")
-                {
-                    revealPassword(entries, snapshot);
-                }
                 else
                 {
-                    std::cout << "Please choose 1, 2, 3, 4, or 5.\n";
+                    std::cout << "Please choose 1 to 7.\n";
                 }
             }
             else

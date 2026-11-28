@@ -18,6 +18,22 @@ struct Entry
     Entry(const Entry&) = delete;
     Entry& operator=(const Entry&) = delete;
 
+    Entry(Entry&& other) noexcept { swapFields(other); }
+    Entry& operator=(Entry&& other) noexcept
+    {
+        swapFields(other);
+        return *this;
+    }
+
+    void swapFields(Entry& other) noexcept
+    {
+        service.swap(other.service);
+        website.swap(other.website);
+        username.swap(other.username);
+        password.swap(other.password);
+        notes.swap(other.notes);
+    }
+
     ~Entry()
     {
         clearString(service);

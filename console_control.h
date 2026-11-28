@@ -1,15 +1,15 @@
 #pragma once
- 
+
 #ifdef _WIN32
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
 #include <windows.h>
- 
+
 inline volatile LONG stopRequested = 0;
 inline volatile LONG cleanupFinished = 0;
 inline bool interrupted() { return InterlockedCompareExchange(&stopRequested, 0, 0) != 0; }
- 
+
 inline BOOL WINAPI handleConsoleInterrupt(DWORD reason)
 {
     const bool closing = reason == CTRL_CLOSE_EVENT || reason == CTRL_LOGOFF_EVENT ||
@@ -34,7 +34,7 @@ inline BOOL WINAPI handleConsoleInterrupt(DWORD reason)
     }
     return TRUE;
 }
- 
+
 class ConsoleControl
 {
 public:
@@ -51,11 +51,11 @@ public:
 #include <fcntl.h>
 #include <termios.h>
 #include <unistd.h>
- 
+
 inline volatile std::sig_atomic_t stopRequested = 0;
 inline int emptyInput = -1;
 inline bool interrupted() { return stopRequested != 0; }
- 
+
 inline void handleConsoleInterrupt(int)
 {
     const int savedError = errno;
@@ -66,7 +66,7 @@ inline void handleConsoleInterrupt(int)
     }
     errno = savedError;
 }
- 
+
 class ConsoleControl
 {
 public:
@@ -98,20 +98,19 @@ public:
         struct sigaction ignore{};
         ignore.sa_handler = SIG_IGN;
         sigemptyset(&ignore.sa_mask);
-        return sigaction(SIGTSTP, &ignore, nullptr) == 0;
+        return sigaction(SIGTSTP, &ignore, nullptr) == 0 && sigaction(SIGPIPE, &ignore, nullptr) == 0;
     }
- 
+
     ~ConsoleControl()
     {
         if (restoreTerminal) tcsetattr(terminal, interrupted() ? TCSAFLUSH : TCSANOW, &original);
         if (terminal >= 0) close(terminal);
         if (emptyInput >= 0) close(emptyInput);
     }
- 
+
 private:
     int terminal = -1;
     termios original{};
     bool restoreTerminal = false;
 };
 #endif
- 

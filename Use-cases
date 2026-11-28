@@ -1,4 +1,4 @@
-Note (Checkpoint 3): these use-cases describe the full product idea. The course
+Note: these use-cases describe the full product idea. The course
 project implements the core of use-case 1 (a secure local vault: create, unlock,
 add, view, edit, delete, copy to clipboard, lock). Password generation, sync between devices, autofill and
 backups (use-cases 2-5) are product ideas outside the scope of this project.

@@ -118,7 +118,7 @@ def check_security(directory):
     fill_entry(app)
     app.expect_exact("The vault changed since unlock")
     assert vault.read_bytes() == modified
-    choose(app, 3)
+    choose(app, 6)
     app.expect_exact("Vault locked.")
     unlock(app, MASTER, "Incorrect password, or the vault file is damaged.")
     vault.write_bytes(saved)
@@ -161,7 +161,7 @@ def check_security(directory):
     assert ("session_end", "interrupted") in [(e["event"], e["result"]) for e in events]
 
 
-def check_owner_and_reveal(directory):
+def check_owner_and_records(directory):
     legacy = {'version': 1, 'salt': '3afcaa338702af02955e956a2da526c9', 'nonce': '0d52237bf33834761811c9160ddd587de6fde9356c869da5', 'encrypted_data': 'c113a8204fa99f3c4b1213741bf2fe4a94433d5993c9eb1220d65928376dd57ff7bf37ee486ad1131ab955240841270557cf0bfd048139'}
     foreign = {'version': 2, 'salt': '7e1623fe04b166d2031f16c6442cc186', 'nonce': '42a4c6909ce0968e1fdacbc4a7f26fe604f0aca32eda393c', 'encrypted_data': 'd2305d7daaf95706f489cf276698908f3a5fcf4932c0b4f27371ac34f6e85fbfaa391ef7f776181702eedc0ed35cb665fcd3790ff2fbd9'}
     vault = Path(directory, "vault.json")
@@ -185,24 +185,68 @@ def check_owner_and_reveal(directory):
     fill_entry(app)
     app.expect_exact("Entry added and saved")
     assert json.loads(vault.read_text())["version"] == 2
-    finish(app, 4)
+    finish(app, 7)
     app = start(directory)
     unlock(app, MASTER, "Vault unlocked successfully.")
+
     choose(app, 5)
-    answer(app, "Entry number to reveal (1-2): ", "0")
+    answer(app, "Entry number to copy (1-2): ", "0")
     app.expect_exact("Invalid entry number.")
     choose(app, 5)
-    answer(app, "Entry number to reveal (1-2): ", "1")
+    answer(app, "Entry number to copy (1-2): ", "1")
+    app.expect_exact("Choose an option: ")
+    assert "copied to the clipboard" in app.before or "Could not use the clipboard" in app.before
+    assert "old-secret" not in app.before
+    app.sendline("2")
+    app.expect_exact("Choose an option: ")
+    assert "old-secret" not in app.before and app.before.count("Password: [hidden]") == 2
+
+    app.sendline("3")
+    answer(app, "Entry number to edit (1-2): ", "1")
+    answer(app, "Service name: ", "   ")
+    app.expect_exact("Invalid field")
+    choose(app, 3)
+    answer(app, "Entry number to edit (1-2): ", "1")
+    for label, value in [("Service name: ", ""), ("Website: ", ""), ("Username: ", "")]:
+        answer(app, label, value)
+    answer(app, "(Enter keeps the current one): ", "")
+    answer(app, "Notes: ", "")
+    app.expect_exact("Nothing was changed.")
+    choose(app, 3)
+    answer(app, "Entry number to edit (1-2): ", "1")
+    for label, value in [("Service name: ", "renamed-service"), ("Website: ", ""), ("Username: ", "")]:
+        answer(app, label, value)
+    answer(app, "(Enter keeps the current one): ", "new-secret-value")
+    answer(app, "Notes: ", "edited note")
+    app.expect_exact("Entry updated and saved")
+
+    choose(app, 4)
+    answer(app, "Entry number to delete (1-2): ", "2")
     answer(app, "Type yes: ", "no")
-    app.expect_exact("Reveal cancelled.")
-    choose(app, 5)
-    answer(app, "Entry number to reveal (1-2): ", "1")
+    app.expect_exact("Delete cancelled.")
+    choose(app, 4)
+    answer(app, "Entry number to delete (1-2): ", "2")
     answer(app, "Type yes: ", "yes")
-    app.expect_exact("Password: old-secret")
-    finish(app, 4)
+    app.expect_exact("Entry deleted")
+    finish(app, 7)
+
+    app = start(directory)
+    unlock(app, MASTER, "Vault unlocked successfully.")
+    choose(app, 2)
+    app.expect_exact("Choose an option: ")
+    view = app.before
+    assert "Service: renamed-service" in view and "Notes: edited note" in view
+    assert "demo-service" not in view and view.count("Entry ") == 1
+    assert "new-secret-value" not in view
+    app.sendline("7")
+    app.expect(pexpect.EOF)
+    app.close()
     log = Path(directory, "vault.audit.log").read_text()
-    assert '"event":"password_reveal","result":"success"' in log
-    assert "old-secret" not in log and ENTRY_PASSWORD not in log
+    for event in ["entry_edit", "entry_delete"]:
+        assert f'"event":"{event}","result":"success"' in log
+    assert '"event":"password_copy"' in log
+    for secret in ["old-secret", "new-secret-value", ENTRY_PASSWORD, "renamed-service", "edited note"]:
+        assert secret not in log
 
 
 def last_event(directory):
@@ -243,7 +287,7 @@ def check_signals_and_tampering(directory):
     assert app.isalive()
     app.sendline(MASTER)
     app.expect_exact("Vault unlocked successfully.")
-    finish(app, 4)
+    finish(app, 7)
 
     app = start(directory)
     unlock(app, "wrong", "Incorrect password")
@@ -280,7 +324,7 @@ if __name__ == "__main__":
     with TemporaryDirectory() as directory:
         check_security(directory)
     with TemporaryDirectory() as directory:
-        check_owner_and_reveal(directory)
+        check_owner_and_records(directory)
     with TemporaryDirectory() as directory:
         check_signals_and_tampering(directory)
-    print("CLI security, ownership, signal and tampering checks passed")
+    print("CLI security, ownership, record editing, signal and tampering checks passed")

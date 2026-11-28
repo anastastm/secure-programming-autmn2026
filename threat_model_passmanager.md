@@ -9,7 +9,7 @@
 |Vault at rest|Plaintext passwords appear in temporary files, backups, or logs.|Never write plaintext credentials!|
 |Vault in memory|Malware or another process reads decrypted passwords / the encryption key from memory.|Keep sensitive data in memory only while needed and lock the session automatically, after that clear sensitive buffers after use.|
 |Vault in memory|Secrets remain in memory after the user locks the vault.|Securely clear the derived key and decrypted vault data.|
-|User interface|Someone sees the user entering / viewing a password.|Mask password fields, reveal stored passwords only when requested.|
+|User interface|Someone sees the user entering / viewing a password.|Mask password fields; never display stored passwords, copy them to the clipboard and clear it after 30 seconds.|
 |User interface|A user accesses the vault without authentication.|Keep the vault locked by default and require successful authentication before usage.|
 |User interface|Weak passwords are generated.|Use a cryptographically secure random-number generator and generate passwords with sufficient length + complexity.|
 
@@ -22,7 +22,7 @@
 |Threat|Status|
 |-|-|
 |Brute-forcing the master password|Done: Argon2id ("moderate" cost for new vaults) with a random salt; 5 attempts, then a cooldown that doubles per lockout up to 1 hour; attempts survive restarts; a deleted counter starts a lockout; weak master passwords are rejected.|
-|Password exposure (screen, logs, errors)|Done: masked input, explicit reveal with confirmation, no secrets in logs or error messages.|
+|Password exposure (screen, logs, errors)|Done: masked input; passwords are never printed, only copied to the clipboard and cleared after 30 s, on lock and on exit; no secrets in logs or error messages.|
 |Stolen vault file|Done: XChaCha20-Poly1305 (authenticated encryption, same security goal as AES-256-GCM).|
 |Modified vault file|Done: the authentication tag is verified before decryption; the file is also compared with the unlocked copy before saving. Not covered: rollback to an older valid copy.|
 |Nonce reuse|Done: a fresh random 24-byte nonce for every save.|

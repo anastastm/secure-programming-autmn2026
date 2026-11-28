@@ -19,8 +19,11 @@ else()
 endif()
 target_link_libraries(password_manager PRIVATE ${SODIUM_TARGET})
 
+find_package(Threads REQUIRED)
+target_link_libraries(password_manager PRIVATE Threads::Threads)
+
 if(WIN32)
-    target_link_libraries(password_manager PRIVATE advapi32)
+    target_link_libraries(password_manager PRIVATE advapi32 user32)
 endif()
 
 if(MSVC)

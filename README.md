@@ -7,8 +7,9 @@ A small cross-platform command-line password manager written in C++. It stores a
 - Create a vault with a master password and confirmation.
 - Mask the master password and entry passwords as they are typed.
 - Unlock and lock the vault with the master password.
-- Add entries with a service, website, username, password, and notes.
-- View a masked list, or use option 5 and confirm with `yes` to show one selected password on the terminal.
+- Add, edit and delete entries with a service, website, username, password, and notes. Every change is saved to the encrypted vault at once; a delete needs confirmation with `yes`.
+- View the entries with every password shown as `[hidden]`. Passwords are never printed.
+- Copy one password to the clipboard. It is removed from the clipboard after 30 seconds, when the vault is locked, and when the program ends (also after Ctrl+C).
 - Save entries in `vault.json` in encrypted form and load them after unlocking.
 - Reject an incorrect master password or damaged encrypted data.
 - Require 15-256 printable ASCII characters for a new master password and reject guessable ones (repeated characters or blocks, sequences such as `12345` or `qwerty`, and common words such as `password` with a short remainder).
@@ -51,6 +52,29 @@ cmake --build build --config Debug
 
 Replace `C:/path/to/vcpkg` with the directory where you installed vcpkg. The included `vcpkg.json` installs libsodium automatically when CMake configures the project. You can also open this folder in Visual Studio as a CMake project.
 
+## User manual
+
+Start the program from the folder where the vault should be kept:
+
+```bash
+./build/password_manager          # Linux
+build\Debug\password_manager.exe   # Windows
+```
+
+| Menu | Option | What it does |
+| --- | --- | --- |
+| No vault | 1. Create vault | Choose a master password (15-256 characters, not guessable) and type it again. |
+| Locked | 1. Unlock vault | Type the master password. After 5 wrong tries the vault is blocked (60 s, doubling up to 1 h). |
+| Unlocked | 1. Add entry | Service (required), website, username, password (hidden, required), notes. |
+| Unlocked | 2. View entries | Lists all entries; passwords are shown as `[hidden]`. |
+| Unlocked | 3. Edit entry | Choose the entry number, then type new values. Press Enter to keep a value. |
+| Unlocked | 4. Delete entry | Choose the entry number and confirm with `yes`. |
+| Unlocked | 5. Copy a password | Choose the entry number; the password is copied to the clipboard for 30 seconds. |
+| Unlocked | 6. Lock vault | Wipes the key and entries from memory and clears the clipboard. |
+| Unlocked | 7. Exit | Ends the program; also clears the clipboard. |
+
+**Clipboard.** On Windows the program uses the system clipboard directly and marks the copied password so it is not kept in the clipboard history or cloud clipboard. On Linux it uses one of these programs at its fixed system path: `clip.exe` (WSL), `wl-copy` (Wayland, package `wl-clipboard`), `xclip` or `xsel` (X11). The password is passed through a pipe, never on a command line. If none is available, the program says so and the password is not shown or copied.
+
 ## First use and basic check
 
 1. Choose **Create vault** and set a master password.
@@ -83,7 +107,7 @@ An invalid field cancels adding that entry. Oversized text lines are drained bef
 
 ## Vault ownership
 
-Each vault belongs to one local OS account. Unlock requires the master password and the same account identifier used at creation (Linux UID or Windows SID). Add, view, reveal, and save check the account again inside the operation. Run the program in a private directory for each vault.
+Each vault belongs to one local OS account. Unlock requires the master password and the same account identifier used at creation (Linux UID or Windows SID). Add, view, edit, delete, copy, and save check the account again inside the operation. Run the program in a private directory for each vault.
 
 Version 1 vaults predate account binding. Open the original file under its filesystem owner and enter its existing master password. Viewing leaves the file at version 1. The next successful save writes version 2. Keep a private backup before upgrading if you need to use the older program. A version 2 vault depends on its original account identifier, so moving it to a different account or operating system requires a separate transfer feature. Local UIDs can repeat on different computers.
 
@@ -111,7 +135,7 @@ Unlock checks the version, required fields, hex encoding and authentication tag 
 
 Windows uses the account SID. Linux uses the numeric user ID and creates the audit log with owner-only permissions. Windows files inherit directory permissions. Events are not shown on the screen; only if the log file cannot be written is the event printed to standard error. Passwords, usernames stored in entries, and other record contents are excluded. The chain has no secret key, so the account owner could rebuild the whole log consistently; it detects careless edits and deleted lines, not a careful rewrite by the same account.
 
-Logged events: `session_start`, `session_end`, `vault_create`, `vault_unlock`, `vault_lock`, `vault_save`, `entry_add`, `entry_view`, `password_reveal`, `audit_log`, `unlock_limit`, `memory_lock` and `process_hardening`, each with a fixed result label such as `success`, `failure`, `rate_limited`, `counter_missing`, `access_denied` or `interrupted`.
+Logged events: `session_start`, `session_end`, `vault_create`, `vault_unlock`, `vault_lock`, `vault_save`, `entry_add`, `entry_view`, `entry_edit`, `entry_delete`, `password_copy`, `audit_log`, `unlock_limit`, `memory_lock` and `process_hardening`, each with a fixed result label such as `success`, `failure`, `rate_limited`, `counter_missing`, `access_denied` or `interrupted`.
 
 ## Tests
 
@@ -136,7 +160,7 @@ CTest runs four suites:
 - `security_controls`: vault file format, unlock counter persistence, escalating cooldowns, a deleted or forged counter, and audit-log chain verification and tamper handling.
 - `vault_crypto`: key derivation, encryption and decryption round trip, wrong password, another account, fresh nonce per save, and changed ciphertext, tag, nonce or length.
 
-The optional Linux terminal suite uses Python 3 and `pexpect` (`pip install pexpect`). It launches the real application in a temporary directory and checks weak passwords, restart behavior, 20 wrong passwords, Ctrl+C, Ctrl+\\, SIGTERM, SIGHUP and Ctrl+Z, that log events stay off the screen, a deleted counter, vault and audit-log tampering, ownership and password reveal.
+The optional Linux terminal suite uses Python 3 and `pexpect` (`pip install pexpect`). It launches the real application in a temporary directory and checks weak passwords, restart behavior, 20 wrong passwords, Ctrl+C, Ctrl+\\, SIGTERM, SIGHUP and Ctrl+Z, that log events stay off the screen, a deleted counter, vault and audit-log tampering, ownership, copying, editing and deleting entries.
 
 ```sh
 python3 tests/terminal_security_tests.py ./build/password_manager
@@ -148,4 +172,4 @@ python3 tests/terminal_security_tests.py ./build/password_manager
 
 ## Current limits
 
-This checkpoint supports adding, listing, and explicitly revealing entries. It does not yet support editing, deleting, or searching entries, and it does not detect a rollback to an older vault file. It is a course project and is not intended to replace a professionally reviewed password manager.
+It does not support searching entries or clearing an optional field once it has a value (edit can only replace it), and it does not detect a rollback to an older vault file. On Linux the clipboard is cleared after 30 seconds even if the user has copied something else in the meantime. It is a course project and is not intended to replace a professionally reviewed password manager.

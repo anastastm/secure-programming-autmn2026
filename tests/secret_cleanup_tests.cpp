@@ -11,6 +11,7 @@ static_assert(!std::is_copy_constructible_v<VaultKeyWiper>);
 static_assert(!std::is_move_constructible_v<VaultKeyWiper>);
 static_assert(!std::is_copy_constructible_v<StringWiper>);
 static_assert(!std::is_copy_constructible_v<Entry>);
+static_assert(std::is_nothrow_move_constructible_v<Entry>);
 
 bool allBytesEqual(const VaultKey& key, unsigned char value)
 {
@@ -168,8 +169,34 @@ bool checkStoredFieldValidation()
     return true;
 }
 
+bool checkEntryMoves()
+{
+    std::deque<Entry> rows;
+    for (const char* name : {"a", "b", "c"})
+    {
+        Entry& row = rows.emplace_back();
+        row.service = name;
+        row.password = std::string("pw-") + name;
+    }
+    Entry removed(std::move(rows[1]));
+    if (!rows[1].service.empty() || !rows[1].password.empty()) return false;
+    rows.erase(rows.begin() + 1);
+    if (rows.size() != 2 || rows[0].service != "a" || rows[1].service != "c" ||
+        rows[1].password != "pw-c" || removed.password != "pw-b")
+    {
+        return false;
+    }
+    rows.emplace(rows.begin() + 1, std::move(removed));
+    return rows.size() == 3 && rows[1].service == "b" && removed.service.empty();
+}
+
 int main()
 {
+    if (!checkEntryMoves())
+    {
+        std::cerr << "Moving entries lost or duplicated data.\n";
+        return 1;
+    }
     VaultKey key{};
     const unsigned char marker = 0xA5;
     std::fill(std::begin(key), std::end(key), marker);

@@ -32,16 +32,19 @@ START
             other -> show "Please choose 1 or 2"
 
         ELSE:
-            show "1. Add entry" / "2. View entries" / "3. Lock vault" /
-                 "4. Exit" / "5. Reveal one password"
+            show "1. Add entry" / "2. View entries" / "3. Edit entry" /
+                 "4. Delete entry" / "5. Copy a password" / "6. Lock vault" / "7. Exit"
             read menuChoice
             "1" -> ADD ENTRY
             "2" -> VIEW ENTRIES
-            "3" -> LOCK VAULT
-            "4" -> userWantsToExit = true
-            "5" -> REVEAL PASSWORD
-            other -> show "Please choose 1, 2, 3, 4, or 5"
+            "3" -> EDIT ENTRY
+            "4" -> DELETE ENTRY
+            "5" -> COPY PASSWORD
+            "6" -> LOCK VAULT
+            "7" -> userWantsToExit = true
+            other -> show "Please choose 1 to 7"
 
+    clear the clipboard if a password is still on it
     wipe entries and sessionKey
     log session_end (success or interrupted)
     restore the terminal settings
@@ -120,16 +123,36 @@ VIEW ENTRIES:
     log entry_view success
 
 
-REVEAL PASSWORD:
+EDIT ENTRY:
     check that the current account is the vault owner
-    require an interactive terminal for output
     read the entry number (digits only, in range)
-    ask "Type yes" to confirm
-    IF confirmed:
-        log password_reveal success
-        show that one password
-    ELSE:
-        show "Reveal cancelled"
+    copy the entry; for each field read a new value (Enter keeps the old one)
+    validate every new value like ADD ENTRY; on any invalid value:
+        log input_rejected / validation_failed, keep the entry unchanged, return
+    IF nothing changed: show "Nothing was changed", return
+    replace the entry and SAVE VAULT
+    IF the save fails: put the old values back, log save_failed
+    ELSE: log entry_edit success
+
+
+DELETE ENTRY:
+    check that the current account is the vault owner
+    read the entry number (digits only, in range)
+    ask "Type yes" to confirm; anything else -> show "Delete cancelled"
+    remove the entry and SAVE VAULT
+    IF the save fails: put the entry back, log save_failed
+    ELSE: log entry_delete success
+
+
+COPY PASSWORD:
+    check that the current account is the vault owner
+    read the entry number (digits only, in range)
+    copy the password to the clipboard (never print it)
+        Windows: system clipboard, excluded from clipboard history
+        Linux: clip.exe / wl-copy / xclip / xsel at fixed paths, password via a pipe
+    IF no clipboard is available: show a message, log clipboard_unavailable
+    ELSE: show "copied, cleared in 30 seconds", log password_copy success
+    a timer clears the clipboard after 30 seconds
 
 
 SAVE VAULT:
@@ -142,6 +165,7 @@ SAVE VAULT:
 
 
 LOCK VAULT:
+    clear the clipboard if a password is still on it
     wipe entries and sessionKey
     vaultUnlocked = false
     show "Vault locked", log vault_lock success
